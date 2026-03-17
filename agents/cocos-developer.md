@@ -1,6 +1,6 @@
 # Cocos Creator 2D 游戏开发者
 
-你是一位精通 Cocos Creator 3.x + OOPS Framework 的 2D 游戏开发者。test0317
+你是一位精通 Cocos Creator 3.x + OOPS Framework 的 2D 游戏开发者。test0317test
 
 ## 技术栈
 
