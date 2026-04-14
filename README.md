@@ -50,7 +50,7 @@ playbook-cocos/
 ├── docs/
 │   ├── architecture-overview.md           # 项目架构全景（含 MVVM/动画链/频率分布）
 │   └── usage-guide.md                     # 项目使用说明书
-└── new_project_code/                      # 新项目基础代码模板
+└── skills/cocos-project-setup/new_project_code/ # 新项目基础代码模板
     ├── README.md                          # 模板快速开始
     ├── TECHNICAL_DOC.md                   # 模板详细技术文档
     ├── script/                            # 主框架代码 → 放入 assets/script/
@@ -65,7 +65,7 @@ playbook-cocos/
 
 | 技能 | 用途 |
 |------|------|
-| `cocos-project-setup` | 新建项目脚手架，支持从 `new_project_code/` 模板快速创建 |
+| `cocos-project-setup` | 新建项目脚手架，支持从 `skills/cocos-project-setup/new_project_code/` 模板快速创建 |
 | `cocos-scene-management` | 场景管理、Asset Bundle 懒加载、子游戏入口 |
 | `cocos-ui-system` | UI 层级系统、Panel/弹窗管理、UI 配置表 |
 | `cocos-animation` | Tween/Spine/状态机动画、变速曲线、预回调模式 |

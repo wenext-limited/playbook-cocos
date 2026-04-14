@@ -558,8 +558,8 @@ App 级别配置：应用名称、榜单类型、时区、货币类型等。
 ### Step 1: 复制文件
 
 ```
-new_project_code/script/        →  项目/assets/script/
-new_project_code/GameBundle/    →  项目/assets/GameBundle/
+skills/cocos-project-setup/new_project_code/script/        →  项目/assets/script/
+skills/cocos-project-setup/new_project_code/GameBundle/    →  项目/assets/GameBundle/
 ```
 
 将 `template_game` 重命名为你的游戏名（如 `lucky_wheel`）。

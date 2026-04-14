@@ -1,6 +1,6 @@
 ---
 name: cocos-project-setup
-description: 新建 Cocos Creator 游戏项目时使用。推荐从 new_project_code 模板拷贝基础代码来快速搭建，也可手动从零创建。包括脚手架搭建、OOPS 框架集成、入口类编写和初始化配置。不适用于已有项目的功能扩展。
+description: 新建 Cocos Creator 游戏项目时使用。推荐从 skills/cocos-project-setup/new_project_code 模板拷贝基础代码来快速搭建，也可手动从零创建。包括脚手架搭建、OOPS 框架集成、入口类编写和初始化配置。不适用于已有项目的功能扩展。
 tags: [cocos, setup, scaffold, template]
 inputs: [游戏名称, 子游戏名称, 目标平台]
 outputs: [初始化项目结构, 入口类, 全局配置, 子游戏模板]
@@ -12,7 +12,7 @@ outputs: [初始化项目结构, 入口类, 全局配置, 子游戏模板]
 
 使用本技能初始化一个基于 Cocos Creator 3.x + OOPS 框架的 2D 游戏项目。
 
-**推荐方式**：从 `new_project_code/` 模板目录拷贝基础代码，快速获得完整的项目骨架以及通用组件库，再按实际需求定制。
+**推荐方式**：从 `skills/cocos-project-setup/new_project_code/` 模板目录拷贝基础代码，快速获得完整的项目骨架以及通用组件库，再按实际需求定制。
 
 ## 前置条件
 
@@ -43,11 +43,11 @@ extensions/
 
 ### 步骤 3：拷贝模板代码
 
-从本知识库的 `new_project_code/` 目录拷贝文件到项目中：
+从本知识库的 `skills/cocos-project-setup/new_project_code/` 目录拷贝文件到项目中：
 
 ```
-new_project_code/script/        →  项目/assets/script/
-new_project_code/GameBundle/    →  项目/assets/GameBundle/
+skills/cocos-project-setup/new_project_code/script/        →  项目/assets/script/
+skills/cocos-project-setup/new_project_code/GameBundle/    →  项目/assets/GameBundle/
 ```
 
 将 `GameBundle/template_game/` 重命名为你的子游戏名称（如 `lucky_wheel`）。
@@ -309,5 +309,5 @@ export enum GameEvent {
 
 ## 参考资料
 
-- `new_project_code/README.md` — 模板快速开始指南
-- `new_project_code/TECHNICAL_DOC.md` — 模板详细技术文档
+- `skills/cocos-project-setup/new_project_code/README.md` — 模板快速开始指南
+- `skills/cocos-project-setup/new_project_code/TECHNICAL_DOC.md` — 模板详细技术文档
