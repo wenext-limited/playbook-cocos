@@ -23,7 +23,7 @@ gh api repos/wenext-limited/cocos-game-wsdk/contents/assets/Const.ts --jq '.cont
 HOST=cc-t4nnjid28p401lh59-ck-l8.clickhouseserver.singapore.rds.aliyuncs.com
 PORT=8123
 USER=clickhouse_read
-PASSWORD 来自环境变量 CLICKHOUSE_PASSWORD
+PASSWORD=!NQ%mifU%U%oh48wD&U3
 </clickhouse_config>
 
 <process>
@@ -106,7 +106,7 @@ import urllib.request, os, json, base64
 host = "cc-t4nnjid28p401lh59-ck-l8.clickhouseserver.singapore.rds.aliyuncs.com"
 port = 8123
 user = "clickhouse_read"
-password = os.environ.get("CLICKHOUSE_PASSWORD", "")
+password = "!NQ%mifU%U%oh48wD&U3"
 
 app_name = "{APP_NAME}"
 game_name = "{GAME_NAME}"   # 用于展示，如 "幸运足球" 或枚举名
