@@ -55,33 +55,37 @@ lark-cli contact +get-user --as user
 
 ### Step 1：收集信息
 
-通过对话向用户依次询问（未提供时才问，已在消息中提供的直接使用）：
+将 Step 0 读取到的工作类型选项列出，**一次性**向用户发送如下格式的提问（已在调用消息中提供的字段直接使用，无需再问）：
 
-1. **工作内容**（必填）— 做了什么，一句话描述
-2. **工作类型**（必填）— 展示 Step 0 读取到的选项供用户选择
-3. **人工预估耗费（H）**（必填）— 如果不用 AI、纯人工需要多少小时
-4. **AI实际耗时（H）**（必填）— 实际用 AI 辅助花了多少小时
-5. **分享链接**（可选）— 可跳过
-6. **备注**（可选）— 可跳过
-
-### Step 2：计算提效倍率
+根据 Step 0 读取到的工作类型，向用户发送如下模板（已在调用消息中提供的字段直接填入，无需用户重复填写）：
 
 ```
-提效倍率 = round(人工预估耗费 / AI实际耗时, 2)
+请填写本次提效记录（可直接复制回复）：
+
+工作内容：（例：实现龙虎游戏下注逻辑 / 分析排行榜需求方案 / 修复飞币动画闪烁）
+工作类型（选其一）：需求理解 / UI拼接 / 业务逻辑 / 后端对接 / bug修复 / 代码重构 / 工具类
+人工预估耗费（H）：（例：4）
+AI实际耗时（H）：（例：1）
+分享链接（可选）：
+备注（可选）：
 ```
 
-在追加前自行计算，写入 E 列。
+等用户一条消息回复所有字段后再进入 Step 2，**不要逐字段单独追问**。
 
-### Step 3：追加行（执行前告知用户）
+### Step 2：追加行（执行前告知用户）
 
-使用原生 API 写入，A 列（工作内容）包含富文本 @mention：
+**分两步写入，避免覆盖 E 列公式：**
+
+#### 2a：写入 A~D 列（必填字段）
+
+range 只写到 D，不触碰 E 列：
 
 ```bash
 lark-cli api POST /open-apis/sheets/v2/spreadsheets/YfqCs08y6hOAmBt2CrBcqMfXnvW/values_append \
   --as user \
   --data '{
     "valueRange": {
-      "range": "ea09ca!A1:G1",
+      "range": "ea09ca!A1:D1",
       "values": [[
         [
           {"type": "text", "text": "<工作内容> "},
@@ -89,18 +93,32 @@ lark-cli api POST /open-apis/sheets/v2/spreadsheets/YfqCs08y6hOAmBt2CrBcqMfXnvW/
         ],
         "<工作类型>",
         <人工预估H>,
-        <AI实际H>,
-        <提效倍率>,
-        <分享链接或null>,
-        <备注或null>
+        <AI实际H>
       ]]
     }
   }'
 ```
 
+从响应的 `tableRange`（如 `ea09ca!A21:D21`）中提取行号（如 `21`）。
+
+#### 2b：写入 F~G 列（仅当分享链接或备注非空时）
+
+用 `values_update` 写入对应行的 F、G 列：
+
+```bash
+lark-cli api PUT /open-apis/sheets/v2/spreadsheets/YfqCs08y6hOAmBt2CrBcqMfXnvW/values \
+  --as user \
+  --data '{
+    "valueRange": {
+      "range": "ea09ca!F<行号>:G<行号>",
+      "values": [[<分享链接或null>, <备注或null>]]
+    }
+  }'
+```
+
 **注意**：
-- 数字列（C/D/E）直接写数字，不加引号
-- 可选项为空时写 `null`（不加引号）
+- E 列**完全不写**，保留表格原有公式
+- 数字列（C/D）直接写数字，不加引号
 - `<提交人 open_id>` 来自 Step 0 的 `contact +get-user` 结果
 
 ### Step 4：返回确认
