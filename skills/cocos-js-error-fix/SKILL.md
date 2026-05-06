@@ -53,7 +53,7 @@ gh api repos/wenext-limited/cocos-game-wsdk/contents/assets/Const.ts --jq '.cont
 - 每个游戏 sheet 有 android / ios 两个 tab
 - android tab 列顺序：版本(A)、versionCode(B)、minClientVersion(C)、changeList(D)、resourceUrl(E)
 - 取 versionCode 最大的行对应版本号，GitHub 分支名为 `release/{version}`（如 `release/1.0.15`）
-- 源码缓存目录：`/tmp/cocos-game-source/{game_dir}/{version}/`（按版本隔离）
+- 源码缓存目录：`/tmp/cocos-game-source/{game_dir}/`（单目录，按分支 checkout 切换，节省磁盘）
 </repo_config>
 
 <process>
@@ -296,30 +296,41 @@ with open(config_path, 'w') as f:
     json.dump(cfg, f, ensure_ascii=False, indent=2)
 ```
 
-## 6. 拉取 Release 分支源码（带版本缓存）
+## 6. 拉取 Release 分支源码（单目录 + git checkout）
 
-缓存目录按版本隔离，避免不同版本互相覆盖：
+每个游戏只保留一个本地仓库目录，通过 `git fetch` + `git checkout` 切换到目标分支，节省磁盘空间：
 
 ```bash
 GAME_DIR="{GAME_DIR}"
 REPO_NAME="{REPO_NAME}"
 VERSION="{VERSION}"          # 来自 Step 5b，如 1.0.15
 BRANCH="release/${VERSION}"
-CACHE_DIR="/tmp/cocos-game-source/${GAME_DIR}/${VERSION}"
+REPO_DIR="/tmp/cocos-game-source/${GAME_DIR}"
 
-if [ -d "$CACHE_DIR" ]; then
-    echo "使用缓存：$CACHE_DIR (${BRANCH})"
+if [ -d "$REPO_DIR/.git" ]; then
+    # 仓库已存在，fetch 目标分支并 checkout
+    echo "仓库已存在，切换到 ${BRANCH} ..."
+    cd "$REPO_DIR"
+    # 丢弃本地未提交改动（防止上次 fix 遗留的修改导致切换冲突）
+    git checkout -- . 2>&1
+    git clean -fd 2>&1
+    git fetch origin "$BRANCH" --depth 1 2>&1
+    git checkout -B "$BRANCH" "origin/$BRANCH" 2>&1
+    echo "已切换到：$BRANCH"
 else
-    echo "克隆 wenext-limited/${REPO_NAME} @ ${BRANCH} ..."
-    gh repo clone "wenext-limited/${REPO_NAME}" "$CACHE_DIR" -- --depth 1 --branch "$BRANCH" 2>&1
+    # 首次克隆
+    echo "首次克隆 wenext-limited/${REPO_NAME} @ ${BRANCH} ..."
+    gh repo clone "wenext-limited/${REPO_NAME}" "$REPO_DIR" -- --depth 1 --branch "$BRANCH" 2>&1
     echo "克隆完成"
 fi
 
+echo "--- 当前分支 ---"
+cd "$REPO_DIR" && git branch --show-current
 echo "--- 目录结构 ---"
-ls "$CACHE_DIR" 2>/dev/null | head -20
+ls "$REPO_DIR" 2>/dev/null | head -20
 ```
 
-若克隆失败（分支不存在），提示王总并询问是否改用 main 分支或跳过业务代码搜索。
+若 fetch/checkout 失败（分支不存在），提示王总并询问是否改用最新可用分支或跳过业务代码搜索。
 
 ## 7. 双轨搜索
 
@@ -328,13 +339,13 @@ ls "$CACHE_DIR" 2>/dev/null | head -20
 在 tag 源码里搜索错误相关关键词（TypeScript 源文件）：
 
 ```bash
-CACHE_DIR="/tmp/cocos-game-source/{GAME_DIR}"
+REPO_DIR="/tmp/cocos-game-source/{GAME_DIR}"
 KEYWORDS="{KEYWORD1} {KEYWORD2} ..."  # 来自 Step 4 提取的 search_keywords
 
 # 搜索 TypeScript 源码（排除编译产物目录）
 for kw in $KEYWORDS; do
     echo "=== 搜索: $kw ==="
-    grep -rn "$kw" "$CACHE_DIR" \
+    grep -rn "$kw" "$REPO_DIR" \
         --include="*.ts" \
         --exclude-dir=node_modules \
         --exclude-dir=dist \
@@ -344,7 +355,7 @@ done
 
 # 对找到的文件，提取相关行上下文（前后5行）
 # 优先搜索 assets/ 目录下的业务代码
-grep -rn "{PRIMARY_KEYWORD}" "$CACHE_DIR/assets" \
+grep -rn "{PRIMARY_KEYWORD}" "$REPO_DIR/assets" \
     --include="*.ts" \
     -A 5 -B 5 2>/dev/null | head -60
 ```
@@ -425,21 +436,21 @@ grep -rn "{PRIMARY_KEYWORD}" "$CACHE_DIR/assets" \
 - 示例：`feature/fix_js_error_cross_origin_texture`、`feature/fix_js_error_null_spriteframe`
 
 ```bash
-CACHE_DIR="/tmp/cocos-game-source/{GAME_DIR}/{VERSION}"
+REPO_DIR="/tmp/cocos-game-source/{GAME_DIR}"
 REPO_NAME="{REPO_NAME}"
 
 # 构造 branch 名：feature/fix_js_error_{错误简介}
 # 错误简介由 Claude 根据 error_message 自动生成（英文小写，下划线分隔，不超过5词）
 FIX_BRANCH="feature/fix_js_error_{ERROR_SLUG}"
 
-cd "$CACHE_DIR"
+cd "$REPO_DIR"
 
 # 确保 remote 指向正确
 git remote -v
 
 # 从 origin/main 拉取最新
-git fetch origin main
-git checkout -B "$FIX_BRANCH" origin/main
+git fetch origin main --depth 1
+git checkout -B "$FIX_BRANCH" FETCH_HEAD
 echo "已创建分支：$FIX_BRANCH"
 ```
 
@@ -474,7 +485,7 @@ echo "已创建分支：$FIX_BRANCH"
 修改完成后，展示 diff 供王总确认：
 
 ```bash
-cd "$CACHE_DIR"
+cd "$REPO_DIR"
 git diff --stat
 git diff
 ```
@@ -484,7 +495,7 @@ git diff
 确认 diff 无误后提交：
 
 ```bash
-cd "$CACHE_DIR"
+cd "$REPO_DIR"
 
 # 暂存所有修改文件
 git add -p   # 逐块确认，或 git add {修改的文件路径}
@@ -508,7 +519,7 @@ echo "已推送：$FIX_BRANCH"
 ### 9d. 创建 PR
 
 ```bash
-cd "$CACHE_DIR"
+cd "$REPO_DIR"
 
 gh pr create \
   --repo "wenext-limited/{REPO_NAME}" \
