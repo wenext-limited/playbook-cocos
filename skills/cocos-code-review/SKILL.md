@@ -42,11 +42,15 @@ ts_graph_build({ directory, force: false })
 
 ## 变更范围
 
-1. 获取 PR diff 或当前分支 diff。
-2. 只收集新增或修改的代码行。
-3. 排除 `node_modules` 和 node 引入的插件扩展。
-4. TypeScript 文件作为主要审查对象。
-5. `.prefab`、`.scene`、`.json` 等非 TS 文件只作为上下文补充，不扩展点评未修改代码。
+1. 默认审查当前分支相对 `main` 的完整分支差异，而不是只看工作区未提交 diff：
+   - 先读取 `git log --oneline --decorate main..HEAD`，preview 当前分支上的所有历史提交。
+   - 再读取 `git diff --name-status main...HEAD`、`git diff --stat main...HEAD` 和 `git diff main...HEAD -- '*.ts'`。
+   - 报告中必须明确写出对比基准是 `main...HEAD`、分支提交数量、TypeScript 变更文件数量。
+2. 如果用户明确指定 PR、base 分支或只看工作区 diff，才按用户指定范围审查，并在报告中说明范围来源。
+3. 只收集所选 diff 范围内新增或修改的代码行。
+4. 排除 `node_modules` 和 node 引入的插件扩展。
+5. TypeScript 文件作为主要审查对象。
+6. `.prefab`、`.scene`、`.json` 等非 TS 文件只作为上下文补充，不扩展点评未修改代码。
 
 ## ts-graph 分析流程
 
@@ -92,8 +96,9 @@ ts_graph_build({ directory, force: false })
 
 ## 1. 审查摘要
 
-- 审查对象：当前分支 diff / PR diff
+- 审查对象：当前分支 `main...HEAD` 完整 diff / PR diff / 用户指定 diff
 - 对比基准：main 或用户指定 base
+- 分支提交预览：`main..HEAD` 共 N 个提交 / 不适用及原因
 - ts-graph：已构建 / 未构建及原因
 - 变更范围：N 个 TypeScript 文件，M 个非 TS 上下文文件
 - 结论：发现 X 个问题（Critical A / Warning B / Suggestion C）
