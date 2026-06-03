@@ -345,6 +345,19 @@ oops.message.dispatchEvent(SubGameEvent.CoinBankStartFly);
 | 贝塞尔曲线路径 | Tween + onUpdate | 自定义插值函数 |
 | 动画衔接 | 预回调模式 | 解耦动画与后续逻辑 |
 
+## 评分优化 Hook
+
+当用户要求优化、审查或迭代本技能本身时，使用 `hook-scoring.md` 对 `SKILL.md` 进行系统评分。
+
+评分流程：
+
+1. 先完整阅读当前 `SKILL.md`。
+2. 按 `hook-scoring.md` 的 8 个维度给出 0-5 分和加权总分。
+3. 找出低于 4 分的维度，提出可直接写入技能文档的补强内容。
+4. 修改后重新评分，确认低分项已被具体内容修复。
+
+不要把评分标准直接展开到常规动画实现回答中；它只在优化技能文档时作为质量 Hook 使用。
+
 ## 清单
 
 - [ ] 选择合适的动画类型（Tween/Spine/定时器/update）
