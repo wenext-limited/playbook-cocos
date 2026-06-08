@@ -1,7 +1,8 @@
 ---
 name: lark-weekly-meeting-email
 version: 1.3.0
-description: "根据飞书周会文档和 AI 量化统计表格，生成游戏周会纪要 Markdown 文档，并生成 AI 量化 HTML 附件。当用户提到周会纪要、周会邮件、生成周会、周报、周会 md、weekly meeting summary 时使用。"
+description: "用法：/lark-weekly-meeting-email [飞书周会文档链接]。参数必填；根据飞书周会文档链接生成游戏周会纪要 Markdown 和 AI 量化 HTML 附件。当用户提到周会纪要、周会邮件、生成周会、周报、周会 md、weekly meeting summary 时使用。"
+argument-hint: "[飞书周会文档链接]"
 metadata:
   requires:
     bins: ["lark-cli", "python3"]
