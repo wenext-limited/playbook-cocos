@@ -1,17 +1,20 @@
-# Cocos 功能迁移 Skill 使用效果监控文档
+# Cocos Feature Migration Skill Usage Monitoring
 
-## 1. 文档目的
+## 1. Purpose
 
-本文档用于跟踪 `cocos-feature-migration` skill 在真实迁移任务中的使用效果，帮助后续优化 skill 的流程、约束、工具调用、持久化文档质量和最终迁移成功率。
+This document defines how to monitor real `cocos-feature-migration` runs, so future iterations can improve the skill workflow, constraints, tool usage, persistence quality, and final migration success rate.
 
-监控目标不是单纯记录“是否调用了 skill”，而是回答以下问题：
+Monitoring should not only record whether the skill was invoked. It should answer:
 
-1. skill 是否在正确场景被触发？
-2. skill 是否严格执行了前置检查、入口确认、代码闭包、资源闭包、目标差异、迁移落地和验证流程？
-3. 迁移结果是否能跨对话恢复？
-4. 资源依赖是否完整，尤其是否覆盖动态依赖与 Prefab 静态依赖？
-5. 用户是否因为流程卡点、误判或文档不清晰产生额外沟通成本？
-6. 哪些规则需要强化、删减或改写？
+1. Was the skill triggered in the right scenario?
+2. Did the flow follow prechecks, entry confirmation, code closure, resource closure, target gap analysis, migration application, and verification rules?
+3. Can the migration state be resumed across conversations?
+4. Are resource dependencies complete, especially dynamic dependencies and Prefab static dependencies?
+5. Did the user incur extra communication cost because of blocking points, wrong assumptions, or unclear documents?
+6. Which rules should be strengthened, reduced, or rewritten?
+7. What are the total duration and internal step duration of each stage agent?
+8. Which agents or steps are slow, why are they slow, and how can they be optimized?
+9. Did agent collaboration introduce unauthorized business-code writes, compact/step-document conflicts, lost confirmations, noisy outputs, peer-agent waiting, idle-only completion ambiguity, or missing required artifacts?
 
 ---
 
@@ -43,11 +46,12 @@
 | 数据来源 | 用途 | 是否必需 |
 |---|---|---|
 | 会话 transcript | 判断 skill 触发、用户确认、工具调用、最终回答质量 | 是 |
-| `<source-project>/.claude/cocos-feature-migration/source-features/<feature-slug>/source-manifest.md` | 判断源分析基线、复用模式、源侧卡点 | 是 |
-| `<target-project>/.claude/cocos-feature-migration/<feature-slug>/manifest.md` | 判断目标迁移进度、resume 状态、引用的源分析 | 是 |
-| 源项目 `02-source-entry-candidates.md` ~ `04-source-resource-closure.md` | 判断源侧入口、代码闭包、资源闭包质量 | 是 |
-| 目标项目 `01-precheck.md`、`05-target-gap-analysis.md` ~ `07-verification.md` | 判断目标侧前置检查、差异、动作、验证质量 | 是 |
-| `SUMMARY.md` | 判断最终迁移摘要完整性 | 是 |
+| `<source-project>/.claude/cocos-feature-migration/source-features/<feature-slug>/源分析清单.md` | 判断源分析基线、复用模式、源侧卡点 | 是 |
+| `<target-project>/.claude/cocos-feature-migration/migrations/<feature-slug>/迁移清单.md` | 判断目标迁移进度、resume 状态、引用的源分析 | 是 |
+| `<target-project>/.claude/cocos-feature-migration/migrations/<feature-slug>/logs/controller-event-log.jsonl` | 判断主控调度历史、idle-only 收割、确认关闭和 repair round | 建议 |
+| 源项目 `02-源入口候选.md` ~ `04-源资源闭包.md` | 判断源侧入口、代码闭包、资源闭包质量 | 是 |
+| 目标项目 `01-前置检查.md`、`05-目标差异分析.md` ~ `07-迁移验证.md` | 判断目标侧前置检查、差异、动作、验证质量 | 是 |
+| `迁移总结.md` | 判断最终迁移摘要完整性 | 是 |
 | Git 状态与 commit | 判断分析基线是否可靠 | 建议 |
 | ts-graph MCP 调用结果 | 判断代码图谱是否有效使用 | 是 |
 | `cli-anything-cocoscreator` 输出 | 判断资源静态依赖是否有效展开 | 是 |
@@ -218,6 +222,442 @@ code_closure_completeness =
 | 事件链完整性 | event enum、dispatch、listener 闭环 | 事件声明或监听少一段 |
 | 配置链完整性 | UIConfig、常量、i18n、feature switch 接回 | 主代码迁了，但配置链缺失 |
 | 完成定义一致性 | 前期定义的 minimum done / full done 是否在最终判定中被遵守 | 前面定义较严，结尾却口径放宽 |
+| 入口承接语义 | 复用目标现有入口时，是否确认新增 / 共存 / 替换关系 | 把现有按钮改成新功能入口但未确认产品语义 |
+| Prefab unresolved 分类 | 是否区分业务资源缺失、脚本缺绑定、`file=None` 内建资源疑似项 | 只看 unresolved 数量直接 blocked 或直接忽略 |
+| 脚本挂载次级证据 | `asset refs` 不命中时是否检查 prefab 文本短 uuid / meta uuid | refs 查不到就误判未绑定，或未补证就放行 |
+
+### 4.8.x Prefab 静态验证专项评分
+
+| 指标 | 满分标准 | 扣分信号 |
+|---|---|---|
+| deps 分类 | 对每个关键 prefab 记录 missing / unresolved，并按类型分类 | 只记录总数，没有说明来源 |
+| `file=None` 处理 | 关键业务资源解析正常时，将疑似内建资源标为 note，并要求人工编辑器复核 | 直接当作通过且不记录，或直接当作阻塞 |
+| 脚本 refs 补证 | `asset refs` 不命中时，继续查 `.meta` uuid 与 prefab 文本短 uuid | 未执行补证 |
+| 最终状态约束 | 存在无法解释 unresolved 或脚本挂载风险时，最多给 `partial-pass-static` | 风险未闭合仍宣称 completed/static-pass |
+
+### 4.8.y 入口承接策略专项评分
+
+| 指标 | 满分标准 | 扣分信号 |
+|---|---|---|
+| 入口承接表 | 第 5 步输出源入口、目标承接入口、是否替换原行为 | 第 6 步落地后才发现入口语义问题 |
+| 产品语义确认 | 替换目标原入口行为时，标记需确认或引用明确证据 | 擅自把 MyRecords / Record / Activity 等入口改成新功能 |
+| 共存策略 | 说明新增入口与原入口如何共存 | 原功能入口被覆盖但未记录风险 |
+| 总结跟踪 | 第 6、7 步和迁移总结继续跟踪临时入口策略 | 只在差异分析中提一次，最终不再报告 |
+
+### 4.9 Agent 耗时与协作质量监控
+
+监控分为 `standard` 和 `detailed` 两档，避免监控本身拖慢迁移流程。
+
+- `standard`：默认等级，适用于正常完成、小任务、阶段性阻塞和中断恢复。
+- `detailed`：仅在用户要求性能复盘、出现明显慢操作、流程阻塞、回派修复超过 1 次、大型迁移任务或 compact/timing 冲突时启用。
+
+如果本轮没有精确记录，不得编造，必须写“未记录精确耗时”。
+
+#### 4.9.0 standard 监控字段
+
+standard 监控至少覆盖：
+
+| 类别 | 必填内容 |
+|---|---|
+| 会话级 | `started_at`、`ended_at`、`final_status`、`monitoring_level=standard`、总评分 |
+| Agent 级 | agent 名称、是否启动、状态、总耗时、最慢步骤摘要、慢点摘要 |
+| 慢操作 | Top 3 或影响最大的慢点；无精确耗时时可按阻塞/重试/工具慢点列出 |
+| 硬门禁 | ts-graph、cli-anything、Git 快速预检、目标分支确认、入口/边界确认、语义确认 |
+| 待确认项 | open、本轮关闭、影响最终状态的确认项 |
+| Compact 质量 | 只列缺失、stale、冲突或不足以支撑下一阶段的 compact |
+| 协作风险 | 只列实际发生或接近触发的共享写入、越权写业务代码、确认项覆盖、peer-agent waiting、idle-only 无 compact、required artifacts 缺失、主控重启 agent 等风险 |
+| Agent DAG / phase_runtime | current_phase、active_agents、required_artifacts、output_mode、agent-output-missing 次数、completed_with_agent_output_missing 次数、merge_owner、user_confirmation_owner |
+| 第 5 步 DAG | 05a 是否先行完成、05b/05c 是否在 05a 后并行、是否使用 fresh `05x-target-shared-search.compact.json` 提前并行例外、最终 05 是否由主控合并 |
+
+Agent 总耗时表：
+
+| Agent | started_at | ended_at | total_duration_seconds | timing_precision | 状态 | slowest_step | 慢点摘要 |
+|---|---|---|---:|---|---|---|---|
+| `entry-boundary-analyzer` |  |  |  | exact / coarse / unknown |  |  |  |
+| `source-code-closure-analyzer` |  |  |  | exact / coarse / unknown |  |  |  |
+| `source-resource-closure-analyzer` |  |  |  | exact / coarse / unknown |  |  |  |
+| `target-capability-analyzer` |  |  |  | exact / coarse / unknown |  |  |  |
+| `fidelity-risk-analyzer` |  |  |  | exact / coarse / unknown |  |  |  |
+| `resource-migration-planner` |  |  |  | exact / coarse / unknown |  |  |  |
+| `migration-applier` |  |  |  | exact / coarse / unknown |  |  |  |
+| `static-verifier` |  |  |  | exact / coarse / unknown |  |  |  |
+| `final-report-writer` |  |  |  | exact / coarse / unknown |  |  |  |
+
+#### 4.9.0a timing JSONL 聚合优先级
+
+为避免阶段耗时长期停留在 `coarse` / `unknown`，最终监控必须按以下顺序聚合 timing：
+
+1. 优先读取 phase packet / compact 中声明的 `timing_log_path`，解析 `logs/timing/<phase>-<agent>.timing.jsonl`。
+2. 若 timing JSONL 存在，以 `agent_start` / `agent_end` 计算 agent 总耗时，以 `step_end.duration_seconds` 统计慢步骤。
+3. 若 timing JSONL 不存在，但 compact 中有完整 `timing.started_at` / `timing.ended_at` / `total_duration_seconds`，可标记 `timing_precision=coarse` 或按 compact 原值使用。
+4. 若 phase packet 声明了 `timing_log_path` 但文件缺失，必须在 `skill_update_assessment.execution_gap` 中记录 `timing_log_missing`，并给出下一轮修复建议。
+5. 若既无 JSONL 也无 compact timing，不得估算秒数；只能写“未记录精确耗时”，并计入 `unavailable_count`。
+
+慢操作 TopN 的排序规则：
+
+- 精确慢操作：来自 `step_end.duration_seconds`，可参与 Top3 / Top10 精确排序。
+- 推断慢操作：来自工具输出、产物规模、重试记录或人工判断，必须标注 `slowest_step_basis=inferred-from-*`，不得伪装成已测量耗时。
+- 高成本阶段（资源闭包、迁移动作、静态验证、最终报告）若 `timing_precision=unknown`，应在执行差距中建议强化对应 agent prompt 或 timing 写入协议。
+
+
+
+当启用 detailed 时，在 standard 基础上补充完整统计：
+
+| 层级 | 定义 | 字段 |
+|---|---|---|
+| 会话级 | 从用户首次提出迁移任务到最终交付或明确阻塞 | `started_at`、`ended_at`、`total_duration_seconds`、`final_status`、`observability_score` |
+| Agent 级 | 单个阶段 agent 从接收任务到返回 compact 的历时 | `agent_name`、`agent_started_at`、`agent_ended_at`、`agent_total_duration_seconds`、`agent_active_duration_seconds`、`agent_waiting_duration_seconds` |
+| 步骤级 | agent 内部一个可命名步骤的历时 | `step_name`、`owner_agent`、`started_at`、`ended_at`、`duration_seconds`、`status`、`retry_count` |
+| 操作级 | 单次工具调用或单轮分析动作 | `operation_name`、`operation_type`、`tool_name`、`duration_seconds`、`result_status`、`slow_reason_category` |
+
+统一耗时拆分：
+
+- `active_duration_seconds`：主动分析、搜索、工具执行、写文档等实际工作耗时；
+- `waiting_duration_seconds`：等待用户确认、权限确认、主控回派、外部命令或远程服务响应的耗时；
+- `rework_duration_seconds`：因入口/边界不清、搜索重复、验证失败回派、文档不一致导致的返工耗时。
+
+推荐结构指标：
+
+```text
+active_ratio = active_duration_seconds / total_duration_seconds
+waiting_ratio = waiting_duration_seconds / total_duration_seconds
+rework_ratio = rework_duration_seconds / total_duration_seconds
+```
+
+`timing_precision` 取值：
+
+| 值 | 含义 |
+|---|---|
+| `exact` | 有明确开始/结束时间戳，可直接计算 |
+| `coarse` | 只能根据 transcript 相邻时间、agent 回包或日志区间粗估 |
+| `unknown` | 无可靠边界，不能估算 |
+
+粗粒度估算必须显式标记 `timing_precision=coarse`，写明估算依据，不参与慢操作 Top10 的精确排序。
+
+#### 4.9.2 Agent 步骤耗时明细（detailed）
+
+仅 detailed 模式或高成本阶段需要完整步骤耗时明细。例如：
+
+```markdown
+### source-resource-closure-analyzer 步骤耗时
+
+| 步骤 | started_at | ended_at | duration_seconds | 类型 | 主要操作 | 输出 / 证据 | 是否慢操作 | 慢操作原因 | 优化建议 |
+|---|---|---|---:|---|---|---|---|---|---|
+| 读取源侧 manifest / compact |  |  |  | read | 读取源分析清单和源侧摘要 | 源侧摘要.compact.md | 否 |  |  |
+| 执行 asset deps |  |  |  | tool | 展开关键 prefab 静态依赖 | logs/asset-deps-*.txt | 是 | prefab 依赖树大 | 缓存 deps；只展开 confirmed_entry 相关 prefab |
+```
+
+步骤类型固定使用：`read` / `search` / `tool` / `analysis` / `write` / `wait-user` / `wait-main` / `repair` / `verify`。
+
+#### 4.9.3 慢操作 TopN
+
+- standard：输出 Top 3。
+- detailed：输出 Top 10。
+
+| 排名 | Agent | 步骤 | duration_seconds | 类型 | 慢的原因 | 优化建议 |
+|---:|---|---|---:|---|---|---|
+| 1 |  |  |  |  |  |  |
+
+慢操作阈值：
+
+- `duration_seconds >= 120`：慢操作；
+- `duration_seconds >= 300`：明显慢操作；
+- `duration_seconds >= 600`：严重慢操作。
+
+#### 4.9.4 Agent 耗时结构分析（detailed）
+
+| 类别 | total_seconds | 占比 | 说明 |
+|---|---:|---:|---|
+| 工具调用 |  |  | 主要来自 ts-graph / asset deps / asset refs / 搜索 |
+| AI 分析 |  |  | 主要来自职责层、保真风险、目标能力判断 |
+| 文件写入 |  |  | 步骤 md、manifest、compact、总结、监控 |
+| 等待用户 |  |  | 入口、边界、分支、语义确认 |
+| 等待主控 |  |  | 主控复核、回派、补充输入 |
+
+#### 4.9.5 Agent 执行质量概览
+
+standard 只列异常或风险 agent；detailed 才输出完整矩阵。
+
+| Agent | 是否启动 | 输入来源 | 输出文件 | 状态 | 是否超 200 行 | 是否触发待确认 | 是否越权写业务代码 | main 复核结果 | 评分 |
+|---|---|---|---|---|---|---|---|---|---:|
+| `entry-boundary-analyzer` |  |  |  |  |  |  |  |  |  |
+
+#### 4.9.6 Agent 耗时可观测性评分（detailed）
+
+| 得分 | 标准 |
+|---:|---|
+| 10 | 每个 agent 总耗时、步骤耗时、慢操作原因、优化建议均完整 |
+| 8 | agent 总耗时完整，部分步骤耗时缺失 |
+| 6 | 只有阶段耗时，无 agent 内部步骤 |
+| 4 | 只有最终总耗时 |
+| 0 | 未记录耗时 |
+
+该项仅 detailed 模式强制计入总评分；standard 模式可只记录“不足以评分 / 未记录精确耗时”。
+
+---
+
+### 4.10 Agent 协作风险、待确认项与 Compact 质量监控
+
+#### 4.10.1 硬门禁执行结果
+
+| 门禁 | 是否执行 | 结果 | 证据 | 是否影响流程 |
+|---|---|---|---|---|
+| ts-graph MCP |  |  |  |  |
+| cli-anything-cocoscreator |  |  |  |  |
+| Git 快速预检 |  |  |  |  |
+| Git 按需远程探测 |  |  |  |  |
+| 目标 feature 分支确认 |  |  |  |  |
+| 源入口确认 |  |  |  |  |
+| 功能边界确认 |  |  |  |  |
+| 高风险语义确认 |  |  |  |  |
+
+#### 4.10.2 待确认项生命周期
+
+待确认项优先读取结构化 `pending_confirmations`；关键词扫描只作为补漏。
+
+| id | topic | 来源文件 | 首次发现阶段 | status | 关闭证据 | 未关闭影响 |
+|---|---|---|---|---|---|---|
+| feature-boundary-001 | feature-boundary | 02-源入口候选.md | entry-boundary | open / closed / excluded / resolved-by-evidence |  |  |
+
+#### 4.10.3 Compact 摘要质量
+
+standard 只列问题 compact；detailed 输出完整矩阵。
+
+| compact 文件 | 是否存在 | 是否被后续阶段读取 | 是否足够支撑下一阶段 | 是否与步骤 md 矛盾 | 问题 |
+|---|---|---|---|---|---|
+| 源侧摘要.compact.md |  |  |  |  |  |
+| 目标能力摘要.compact.md |  |  |  |  |  |
+| 保真风险摘要.compact.md |  |  |  |  |  |
+| 资源迁移计划摘要.compact.md |  |  |  |  |  |
+| 目标差异摘要.compact.md |  |  |  |  |  |
+| 迁移状态摘要.compact.md |  |  |  |  |  |
+| 最终状态摘要.compact.md |  |  |  |  |  |
+
+#### 4.10.4 Agent 协作风险
+
+| 风险类型 | 是否发生 | 涉及 agent | 影响 | 处理 |
+|---|---|---|---|---|
+| 非 `migration-applier` 修改业务代码 |  |  |  |  |
+| agent 返回完整源码 |  |  |  |  |
+| agent 返回超 200 行 |  |  |  |  |
+| compact 与步骤 md 矛盾 |  |  |  |  |
+| 待确认项被静默清除 |  |  |  |  |
+| 多 agent 写同一 manifest 冲突 |  |  |  |  |
+| 多 agent 覆盖同一第 5 步共享产物 |  |  |  |  |
+| agent 只发送 idle，未返回 compact |  |  |  |  |
+| required artifacts 缺失 |  |  |  |  |
+| 主控追问 / 重启 agent |  |  |  |  |
+| agent 等待 peer / TaskList / 用户答复 |  |  |  |  |
+| phase_runtime 状态与产物不一致 |  |  |  |  |
+| final-report 未关闭 phase_runtime |  | final-report-writer | manifest `current_phase` 未收敛到 completed 或 active_agents/required_artifacts 未清空 | 记录 `execution_gap.manifest_phase_runtime_not_closed` |
+
+### 4.11 技术加速与优化 ROI 监控
+
+本节用于回答：**如果先真实运行一次 skill，之后应该优先优化哪个技术点？**
+
+该节建议在以下场景启用：
+
+- 前 1-3 次真实执行 `cocos-feature-migration`；
+- 用户明确要求性能复盘或优化优先级；
+- 单次迁移总耗时超过 45 分钟；
+- 任一 agent 总耗时超过 10 分钟；
+- 第 6 / 7 步出现 1 次以上回派修复；
+- 资源闭包、目标差异分析或静态验证出现明显重复搜索。
+
+#### 4.11.1 技术加速产物状态
+
+记录本轮是否使用了缓存 / 索引 / 结构化检查产物，以及是否 fresh。缓存只能用于加速，不得用于跳过关键门禁或静默关闭待确认项。
+
+| 产物 | exists | status | hit | build_duration_seconds | miss_or_stale_reason | evidence |
+|---|---|---|---|---:|---|---|
+| `source-code-graph.json` |  | fresh / stale / partial / missing / unavailable |  |  |  |  |
+| `source-symbol-index.json` |  | fresh / stale / partial / missing / unavailable |  |  |  |  |
+| `source-entry-closures/<entry-hash>.json` |  | fresh / stale / partial / missing / unavailable |  |  |  |  |
+| `asset-index.json` |  | fresh / stale / partial / missing / unavailable |  |  |  |  |
+| `prefab-component-index.json` |  | fresh / stale / partial / missing / unavailable |  |  |  |  |
+| `uuid-reverse-index.json` |  | fresh / stale / partial / missing / unavailable |  |  |  |  |
+| `bundle-index.json` |  | fresh / stale / partial / missing / unavailable |  |  |  |  |
+| `resource-path-index.json` |  | fresh / stale / partial / missing / unavailable |  |  |  |  |
+| `target-capability-index.json` |  | fresh / stale / partial / missing / unavailable |  |  |  |  |
+| `05x-target-shared-search.compact.json` |  | fresh / stale / partial / missing / unavailable |  |  |  |  |
+| `migration-dry-run.json` |  | fresh / stale / partial / missing / unavailable |  |  |  |  |
+| `migration-static-check.json` |  | fresh / stale / partial / missing / unavailable |  |  |  |  |
+| `logs/controller-event-log.jsonl` |  | present / missing |  |  |  |  |
+
+建议量化：
+
+```text
+cache_hit_rate = hit_count / applicable_artifact_count
+stale_rate = stale_artifact_count / existing_artifact_count
+cache_build_cost_seconds = sum(build_duration_seconds)
+```
+
+#### 4.11.2 ts-graph 使用收益
+
+用于判断源代码闭包、目标能力分析、迁移影响面验证是否真正受益于 ts-graph。
+
+| 指标 | 值 | 说明 |
+|---|---:|---|
+| `ts_graph_build_duration_seconds` |  | 构建或增量更新图谱耗时 |
+| `ts_graph_query_count` |  | `ts_get_file_context` / `ts_query_symbol` / `ts_get_review_context` 等查询次数 |
+| `ts_graph_failed_count` |  | 查询或构建失败次数 |
+| `ts_graph_fallback_to_search_count` |  | 因 graph 不足、stale 或 unavailable 回退到搜索的次数 |
+| `ts_graph_reduced_files_count` |  | ts-graph 帮助缩小后的候选文件数 |
+| `manual_read_after_ts_graph_count` |  | ts-graph 后仍需人工 Read 的文件数 |
+| `blast_radius_file_count` |  | 第 6 / 7 步基于 changed files 得到的影响文件数 |
+
+判定建议：
+
+- 如果 `ts_graph_build_duration_seconds` 高，但后续 query 少、fallback 多，说明 ts-graph 使用方式需要优化。
+- 如果 `manual_read_after_ts_graph_count` 仍很高，说明入口符号、闭包缓存或 query 粒度需要改进。
+- 如果 `blast_radius_file_count` 远小于目标项目总文件数，说明增量验证有明显收益。
+
+#### 4.11.3 `cli-anything-cocoscreator` 与资源索引收益
+
+用于判断资源 / Prefab / UUID / Bundle 索引是否值得优先建设。
+
+| 指标 | 值 | 说明 |
+|---|---:|---|
+| `cli_total_duration_seconds` |  | CLI 总耗时 |
+| `asset_deps_call_count` |  | `asset deps` 调用次数 |
+| `asset_uuid_call_count` |  | `asset uuid` 调用次数 |
+| `asset_refs_call_count` |  | `asset refs` 调用次数 |
+| `cli_slowest_command` |  | 最慢 CLI 命令及目标资源 |
+| `missing_count` |  | 关键 prefab / asset missing 数量 |
+| `unresolved_count` |  | unresolved 数量，需分类说明 |
+| `index_hit_count` |  | 资源索引命中次数 |
+| `index_miss_count` |  | 资源索引未命中次数 |
+| `repeated_uuid_lookup_count` |  | 重复 uuid 查询次数 |
+| `repeated_prefab_scan_count` |  | 重复 prefab / meta 扫描次数 |
+
+判定建议：
+
+- 如果 `asset_deps_call_count`、`asset_refs_call_count` 很高且 `index_hit_count` 低，优先建设资源索引。
+- 如果 `repeated_uuid_lookup_count` 高，优先建设 `uuid-reverse-index.json`。
+- 如果 `unresolved_count` 高且分类不清，优先优化 Prefab 静态验证与 unresolved 分类规则。
+
+#### 4.11.4 第 5 步 shared search bundle 收益
+
+用于判断 `target-capability-analyzer`、`fidelity-risk-analyzer`、`resource-migration-planner` 是否在重复搜索目标项目。
+
+| 指标 | 值 | 说明 |
+|---|---:|---|
+| `shared_search_bundle_created` |  | 是否生成 `05x-target-shared-search.compact.json` |
+| `shared_search_bundle_schema_valid` |  | 是否包含 ui_config/event/api/native_kv/activity/i18n/prefab/resource/common capability 命中数组 |
+| `shared_search_bundle_read_by_agents` |  | 读取该 bundle 的 agent 列表 |
+| `duplicate_search_count` |  | 重复搜索次数 |
+| `duplicate_search_patterns` |  | 重复搜索的关键词 / 目录 / 能力类型 |
+| `target_global_search_count` |  | 目标项目全局搜索次数 |
+| `avoided_search_estimate` |  | 因共享包预计减少的重复搜索次数或耗时 |
+| `missing_shared_bundle_impact` |  | 未生成共享包造成的影响 |
+
+判定建议：
+
+- 如果第 5 步最慢且 `duplicate_search_count` 高，优先建设 shared search bundle。
+- 如果三个第 5 步 agent 都搜索 request / event / i18n / native / prefab 目录，说明 shared bundle 收益高。
+
+#### 4.11.5 migration dry-run 收益
+
+用于判断迁移前 dry-run 是否减少第 6 / 7 步返工。
+
+| 指标 | 值 | 说明 |
+|---|---:|---|
+| `dry_run_created` |  | 是否生成 `migration-dry-run.json` |
+| `dry_run_consumed_by_migration_applier` |  | migration-applier 是否按 dry-run 执行动作并摘要引用 |
+| `dry_run_duration_seconds` |  | dry-run 耗时 |
+| `copy_conflict_count` |  | copy_files 中 conflict 数量 |
+| `overwrite_risk_count` |  | overwrite-risk 数量 |
+| `import_rewrite_issue_count` |  | import rewrite 问题数量 |
+| `asset_mapping_issue_count` |  | asset mapping 问题数量 |
+| `prefab_rebind_issue_count` |  | prefab rebind 问题数量 |
+| `target_conflict_count` |  | 目标同名文件、同名资源、UUID 冲突等数量 |
+| `dry_run_prevented_rework` |  | 是否提前避免实际返工，记录证据 |
+
+判定建议：
+
+- 如果 dry-run 发现大量 conflict / rewrite / rebind 问题，说明第 6 步前置 dry-run 必须保留。
+- 如果 dry-run 耗时低且减少回派修复，应提高优先级。
+
+#### 4.11.6 migration static-check 收益
+
+用于判断静态验证脚本化是否值得优先建设。
+
+| 指标 | 值 | 说明 |
+|---|---:|---|
+| `static_check_created` |  | 是否生成 `migration-static-check.json` |
+| `static_check_consumed_by_final_report` |  | final-report-writer 是否优先消费该 JSON |
+| `static_check_duration_seconds` |  | 静态检查耗时 |
+| `static_issue_count_total` |  | 自动发现 issue 总数 |
+| `static_issue_count_by_type` |  | import / symbol / dto / event / resource-path / prefab-uuid / i18n 等分类数量 |
+| `repair_rounds_triggered` |  | 触发修复回合数量 |
+| `issues_auto_detected` |  | static-check 自动发现的问题数 |
+| `issues_found_later` |  | static-check 后续才发现的问题数 |
+| `false_positive_count` |  | 误报数量 |
+
+判定建议：
+
+- 如果第 7 步慢且 `repair_rounds_triggered` 高，优先建设 static-check。
+- 如果 `issues_found_later` 高，说明 static-check 覆盖不足。
+- 如果 `false_positive_count` 高，说明静态检查规则需要分级，不应直接阻塞。
+
+#### 4.11.7 返工、等待与重复劳动来源
+
+| 指标 | 值 | 说明 |
+|---|---:|---|
+| `user_confirmation_count` |  | 用户确认次数 |
+| `pending_confirmations_open_count` |  | 结束时仍 open 的确认项数量 |
+| `repair_round_count` |  | 第 6 / 7 步回派修复次数 |
+| `migration_applier_rework_count` |  | migration-applier 返工次数 |
+| `duplicated_agent_work_count` |  | 多 agent 重复劳动次数 |
+| `rework_duration_seconds` |  | 返工总耗时 |
+| `waiting_duration_seconds` |  | 等待用户、权限、主控、外部命令耗时 |
+
+判定建议：
+
+- 如果 `waiting_duration_seconds` 高，优先优化确认点合并和前置澄清。
+- 如果 `rework_duration_seconds` 高，优先优化 dry-run、static-check 和差异分析质量。
+- 如果 `duplicated_agent_work_count` 高，优先优化 shared bundle 和 compact 结构化。
+
+#### 4.11.8 优化候选排序模板
+
+每次 detailed 监控结束时，建议输出以下排序表，直接服务下一轮 skill 优化：
+
+| 优化候选 | 影响阶段 | 观察到的问题 | 证据 | 预计节省时间 | 实现成本 | 优先级 |
+|---|---|---|---|---:|---|---|
+| 资源 / Prefab / UUID 索引 | 第 4 / 7 步 |  |  |  | low / medium / high | P0 / P1 / P2 |
+| 源代码闭包缓存 + ts-graph 查询缓存 | 第 2 / 3 / 7 步 |  |  |  | low / medium / high | P0 / P1 / P2 |
+| target capability index | 第 5 步 |  |  |  | low / medium / high | P0 / P1 / P2 |
+| shared search bundle | 第 5 步 |  |  |  | low / medium / high | P0 / P1 / P2 |
+| migration dry-run | 第 6 / 7 步 |  |  |  | low / medium / high | P0 / P1 / P2 |
+| migration static-check | 第 7 步 |  |  |  | low / medium / high | P0 / P1 / P2 |
+| Markdown + JSON 双 compact | 跨阶段 |  |  |  | low / medium / high | P0 / P1 / P2 |
+| final report 模板化 | 最终报告 |  |  |  | low / medium / high | P0 / P1 / P2 |
+
+优先级判断规则：
+
+```text
+P0 = 高耗时或高返工，且预计节省明显，或影响迁移正确性
+P1 = 中等耗时 / 中等返工，预计能改善下一轮效率
+P2 = 主要改善可读性、报告质量或小幅减少耗时
+```
+
+推荐结论格式：
+
+```markdown
+本次最值得优先优化：
+
+1. <优化候选>
+   - 影响阶段：
+   - 证据：
+   - 预计收益：
+   - 实现成本：
+   - 优先级：
+
+2. <优化候选>
+   ...
+```
+
+### 9.1 前置检查遗漏
 
 现象：未检查 ts-graph 或 CLI 就开始搜索文件。
 
@@ -379,14 +819,14 @@ code_closure_completeness =
 
 ### 13.1 单次任务结束后
 
-1. 读取该任务的 `manifest.md` 与步骤文档。
+1. 读取该任务的 `迁移清单.md` 与步骤文档。
 2. 对照第 5 节评分模型打分。
-3. 生成 `MONITORING.md`。
+3. 生成 `使用效果监控.md`。
 4. 如果出现高严重度问题，记录为 skill 优化候选。
 
 ### 13.2 多任务周期复盘
 
-1. 汇总多个 `MONITORING.md`。
+1. 汇总多个 `使用效果监控.md`。
 2. 统计低分模块。
 3. 找出重复出现的失败模式。
 4. 修改 `SKILL.md` 中对应规则。
@@ -402,7 +842,7 @@ code_closure_completeness =
 - [ ] 是否检查 ts-graph MCP
 - [ ] 是否检查 `cli-anything-cocoscreator`
 - [ ] 是否处理 git 状态与用户授权（仅第 1 步执行一次性 stash / pull 初始化）
-- [ ] 是否写入并更新 `manifest.md`
+- [ ] 是否写入并更新 `迁移清单.md`
 - [ ] 多候选入口是否等待用户确认
 - [ ] 代码闭包是否分类为迁移 / 复用 / 适配 / 不迁移
 - [ ] 资源闭包是否包含动态依赖 + CLI 静态依赖
@@ -419,4 +859,4 @@ code_closure_completeness =
 2. **迁移完整性**：代码闭包与资源闭包是否足够完整，是否避免机械复制。
 3. **可恢复与可验证**：跨对话能否继续，最终结果能否被验证和接手。
 
-只要每次迁移都能留下可评分、可复盘、可对比的 `MONITORING.md`，后续就能基于真实失败模式持续优化该 skill，而不是凭感觉修改规则。
+只要每次迁移都能留下可评分、可复盘、可对比的 `使用效果监控.md`，后续就能基于真实失败模式持续优化该 skill，而不是凭感觉修改规则。
