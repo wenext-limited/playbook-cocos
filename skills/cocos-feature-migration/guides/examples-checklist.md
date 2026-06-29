@@ -55,7 +55,7 @@ rg -n "排行榜|rank|ranking|leaderboard" assets
 find assets -iname "*rank*" -o -iname "*leaderboard*"
 ```
 
-如需 `cli-anything-cocoscreator`，先按当前运行环境检查本机命令是否存在；若不存在，先停止分析并引导用户参考部署指南完成安装：`https://github.com/OscargwStudio/cli-anything-cocoscreator/blob/main/DEPLOY.md`。
+如需 `cli-anything-cocoscreator`，先按当前运行环境检查本机命令是否存在；若不存在，进入 degraded mode：优先使用 Prefab / `.meta` 文本扫描、uuid reverse index、已有缓存索引继续只读分析，并在最终状态中降级；只有用户明确要求必须使用 CLI 或缺少最低安全资源证据时才停止并引导用户参考部署指南：`https://github.com/OscargwStudio/cli-anything-cocoscreator/blob/main/DEPLOY.md`。
 
 可用检查命令：
 
@@ -78,7 +78,7 @@ find assets -iname "*rank*" -o -iname "*leaderboard*"
 - [ ] 已确认目标项目 feature 分支处理方式（必须在创建阶段 agent team、启动任何子 agent、以及目标项目 stash / pull / checkout / 业务修改之前完成）：默认建议分支为 `feature/migration_<feature-slug>`；若用户提供 `feature/xxx` 则按用户指定；若当前非默认分支与本次 feature_slug 不一致，已用一层、简单明了的策略确认：从 `origin/main` 创建 / 继续当前本地分支 / 从当前本地分支对应的有效远程上游创建（仅有效时展示）/ 切换已存在迁移分支（仅检测到时展示）/ `base=origin/xxx` 从指定远程基线创建 / `branch=feature/xxx` 改用指定目标分支 / 暂停；当前不可执行策略不得进入编号列表，但自定义基线、自定义分支和暂停策略必须保留。
 - [ ] 已完成第 1 步 Git 状态检查，并记录是否执行 stash / pull
 - [ ] 已明确后续子步骤不再重复执行 stash / clean / pull
-- [ ] 已按当前平台确认 `cli-anything-cocoscreator` 可用，或已提示用户按部署指南安装
+- [ ] 已按当前平台确认 `cli-anything-cocoscreator` 可用；若不可用，已进入 degraded mode 并记录资源闭包置信度 / 最终状态上限，而不是默认完全卡住
 - [ ] 已与用户确认精确功能入口（如存在多个候选）
 - [ ] 已确认功能边界（不只精确入口）
 - [ ] 已定义最小完成标准 / 完整完成标准
@@ -113,3 +113,105 @@ find assets -iname "*rank*" -o -iname "*leaderboard*"
 - `cocos-localization` — 文案 key 与语言资源迁移
 - `cocos-node-binding` — Prefab 节点绑定修复
 - `cocos-code-review` — 迁移后做语义级代码审查
+
+
+---
+
+## 结构化产物示例
+
+### 标准 agent_result 示例
+
+最后一条正常消息必须只包含短 YAML，不要追加自然语言解释。注意：`execution_status` 是 agent 阶段执行状态；`delivery_status_recommendation` 才是迁移交付状态建议，不得用 `status: completed` 表示功能迁移完成：
+
+```yaml
+agent_result:
+  agent: static-verifier
+  phase: 07-static-verifier
+  execution_status: completed
+  delivery_status_recommendation: partial-pass-static
+  main_artifact: /abs/target/.claude/.../07-迁移验证.md
+  state_compact_artifact: /abs/target/.claude/.../07-迁移验证.state.compact.md
+  evidence_compact_artifact: /abs/target/.claude/.../07-迁移验证.evidence.compact.md
+  required_artifacts_ok: true
+  open_confirmations: 0
+  needs_user_confirmation: false
+  pending_confirmations_delta: []
+  key_outputs:
+    artifact_contract_checklist:
+      main_artifact_exists: true
+      main_artifact_non_empty: true
+      state_compact_exists: true
+      state_compact_non_empty: true
+      evidence_compact_exists: true
+      evidence_compact_non_empty: true
+      required_artifacts_ok: true
+      timing_present: true
+      step_timings_summary_present: true
+      timing_observability_present: true
+      final_message_type: agent_result_yaml
+  risks: []
+  repair_recommendations: []
+  blocks_next_phase: false
+  next_action: proceed_to_final_report_writer
+  timing_precision: exact
+  timing_log_path: /abs/target/.claude/.../logs/timing/07-static-verifier-static-verifier.timing.jsonl
+  timing_observability:
+    timing_available: exact
+    unavailable_reason: null
+    slowest_step_basis: measured
+    next_run_timing_fix: null
+```
+
+### 05-controller-merge timing 示例
+
+```jsonl
+{"event":"agent_start","agent":"controller","phase":"05-controller-merge","ts":"2026-06-17 15:00:00"}
+{"event":"step_start","agent":"controller","phase":"05-controller-merge","step":"read 05a/05b/05c compacts","type":"read","ts":"2026-06-17 15:00:01"}
+{"event":"step_end","agent":"controller","phase":"05-controller-merge","step":"read 05a/05b/05c compacts","type":"read","duration_seconds":3,"status":"completed"}
+{"event":"step_start","agent":"controller","phase":"05-controller-merge","step":"write target diff artifacts","type":"write","ts":"2026-06-17 15:00:04"}
+{"event":"step_end","agent":"controller","phase":"05-controller-merge","step":"write target diff artifacts","type":"write","duration_seconds":8,"status":"completed","output_or_evidence":"05-目标差异分析.md; 目标差异摘要.compact.md"}
+{"event":"agent_end","agent":"controller","phase":"05-controller-merge","ts":"2026-06-17 15:00:12","status":"completed","total_duration_seconds":12}
+```
+
+### prefab-static-check-cache expected_scripts 示例
+
+```json
+{
+  "prefab_path": "assets/GameBundle/roulette/prefab/panel/PanelGeneralRank.prefab",
+  "expected_scripts": [
+    {
+      "script": "assets/GameBundle/roulette/script/panel/PanelRankComponent.ts",
+      "script_meta": "assets/GameBundle/roulette/script/panel/PanelRankComponent.ts.meta",
+      "meta_uuid": "...",
+      "full_uuid_hit": true,
+      "short_uuid_hit": true,
+      "compressed_uuid_hit": false,
+      "serialized_script_field_hit": true,
+      "missing_script_signature_hit": false,
+      "binding_evidence": "secondary",
+      "evidence_snippets_path": "logs/prefab-script-binding-PanelGeneralRank.json"
+    }
+  ]
+}
+```
+
+### recommended_patch_tasks 示例
+
+```yaml
+skill_update_assessment:
+  should_update_skill_md: partial
+  should_update_agent_prompts: yes
+  should_update_timing_protocol: yes
+  should_update_static_verifier_rules: no
+  rule_gap: []
+  execution_gap:
+    - completed_with_agent_output_missing:static-verifier
+  tooling_gap:
+    - prefab script binding fastpath cannot classify compressed uuid
+  recommended_patch_tasks:
+    - priority: P0
+      target_file: agent-prompts/static-verifier.md
+      change_type: prompt
+      reason: agent wrote artifacts but did not return short agent_result
+      suggested_change: enforce Artifact Contract Exit Checklist and final YAML-only response
+```

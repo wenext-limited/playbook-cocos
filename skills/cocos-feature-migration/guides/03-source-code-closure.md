@@ -6,7 +6,7 @@
 
 完成本步骤后：写回源项目 `03-源代码闭包.md`，并更新源项目 `源分析清单.md` 中第 3 步状态与 `confirmed_entry`。
 
-从入口 TS 出发，优先基于 ts-graph 查询结果和源代码闭包缓存汇总以下内容。若缓存 fresh，复用 `source-entry-closures/<entry-hash>.json`；若缓存 stale / partial / unavailable，先用 ts-graph 重算静态闭包，再由 AI 补动态语义。
+从入口 TS 出发，优先基于 ts-graph 查询结果和源代码闭包缓存汇总以下内容。若缓存 fresh，复用 `source-entry-closures/<entry-hash>.json`；若缓存 stale / partial / unavailable，优先用 ts-graph 重算静态闭包，再由 AI 补动态语义。若 ts-graph MCP 不可用或 graph build/query 失败，进入 `execution_mode: degraded`：使用 `rg` / Read / import 文本扫描 / 明确调用点搜索降级形成代码闭包，必须记录 `code_closure_confidence: partial`、`degraded_reasons: [ts_graph_unavailable]` 或具体失败原因、未覆盖风险和最终验证上限；不得因 ts-graph 不可用完全卡住源侧只读代码闭包，除非入口/边界未确认或文本扫描也无法形成最低闭包。
 
 1. **功能代码文件列表**
    - 直接调用的 TS 文件
@@ -81,6 +81,45 @@
 若某个职责层被标记为“关键”，则后续第 5 步和第 7 步必须继续核对该职责层是否在目标项目中被完整保留。
 
 #### 3.y 迁移保真闭包（必做）
+
+#### 3.z source_semantic_closure_gate（P0 硬门禁）
+
+> 防卡死调和：`blocks_step5_target_diff` 不应阻止 05x/05a/05b/05c 进行只读补证；它只阻塞第 5 步最终保真裁决或第 6 步写入。若目标侧只读搜索可能补齐证据，controller 应以 constrained fan-out 继续收集证据，并把缺口传播为 `blocks_step6_migration`，而不是直接卡死在第 3 步。
+
+
+源代码闭包阶段不得只用 `code_closure_confidence: partial` 或 `risks` 承载核心语义缺口。若核心职责层依赖的业务语义仍为 `unknown` / `missing` / `partial-without-evidence`，必须结构化阻断后续目标差异或第 6 步写入。
+
+```yaml
+source_semantic_closure_gate:
+  owner: source-code-closure-analyzer
+  applies_to_sections:
+    - semantic_fields
+    - gating_dependencies
+    - event_closures
+    - interface_branches
+    - request_parameter_semantics
+  critical_when:
+    - affects API path or request parameters
+    - affects native/KV/config/gating
+    - affects event producer-consumer closure
+    - affects route/UIID/entry initialization
+    - affects confirmed core boundary responsibility layer
+  must_output:
+    missing_semantic_sections: []
+    critical_unknown_count: 0
+    blocks_step5_target_diff: false
+    blocks_step6_migration: false
+    status_cap_if_continue: static-pass | partial-pass-static | blocked-static
+  block_rules:
+    - if critical_unknown_count > 0 and missing section is needed for target fidelity comparison: blocks_step5_target_diff = true
+    - if critical_unknown_count > 0 but target diff can still inspect target alternatives: blocks_step6_migration = true
+    - if only noncritical/editor-only semantics are unknown: allow_step5_with_constraints and status_cap_if_continue = partial-pass-static
+````
+
+若缓存复用导致上述任一核心表缺失，不能把缓存作为完整闭包。必须写 `missing_semantic_sections`，并把 `blocks_target_fidelity_analysis` / `blocks_step6_migration` 写入 `03-源代码闭包.state.compact.md`、`03-源代码闭包.evidence.compact.md`、phase-summary JSON 和 `agent_result`。
+
+`execution_status: completed` 只允许在以下情况使用：核心语义表均存在且无 critical unknown，或所有 critical unknown 已被明确标为 `blocks_step6_migration: true` 并由 controller 在第 5 步合并前处理。
+
 
 在代码文件清单和职责层表之外，必须额外形成**迁移保真闭包**，用于识别容易被文件迁移遗漏的业务语义和隐性依赖。
 

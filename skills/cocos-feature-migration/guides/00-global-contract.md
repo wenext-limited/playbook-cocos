@@ -128,6 +128,29 @@
 
 除 `migration-applier` 外，其他 agent 不得修改目标业务代码或资源。多个只读分析 agent 可以并行或串行执行，但凡会写同一份步骤文档 / manifest / compact 的 agent，必须改为私有产物或由主控串行合并，禁止并发覆盖共享文件。
 
+### 调度可靠性增强协议（硬规则）
+
+本 skill 的 DAG 调度必须具备 `checkpoint + state bootstrap + heartbeat + watchdog + artifact harvest + DAG transition` 六件套，确保主控不依赖用户追问或 agent 自述推进。
+
+```yaml
+reliable_scheduler:
+  checkpoint: controller-checkpoint.compact.md
+  state_bootstrap: controller writes running state before each Agent
+  heartbeat: agent updates logs/heartbeat/<phase>-<agent>.heartbeat.json
+  watchdog: controller schedules Monitor or Bash background one-shot
+  artifact_harvest: controller checks required artifacts + state compact on every wake
+  dag_transition: controller advances phase when artifacts are complete and no open gate
+```
+
+要求：
+
+1. **state bootstrap**：主控启动 agent 前必须预创建 `state_compact_artifact`，写入 `status: running`、`phase_runtime`、`required_artifacts_pending`、`heartbeat_path`、`watchdog_status`。
+2. **heartbeat**：agent 启动后必须尽快写 heartbeat，并在关键 step 更新 `current_step`、`completed_steps`、`last_output_path`、`updated_at`。heartbeat 只保存调度信息，不保存完整证据。
+3. **watchdog**：主控启动 agent 后必须安排 bounded watchdog；优先 `Monitor`，不可用时用 `Bash(run_in_background=true)` one-shot fallback。watchdog 只输出 checkpoint / completed / soft_timeout / failed 单行事件。
+4. **artifact harvest**：收到 agent_result、idle、watchdog、用户状态询问或 resume 时，主控统一检查 required artifacts 和 state compact；完整则推进，缺失则追问一次 / 重启一次 / 阻塞。
+5. **DAG transition**：每个阶段完成后必须按显式 transition 启动下一阶段或进入用户确认门禁，不得停在隐式等待。
+6. **上下文预算**：checkpoint <= 80 行、heartbeat <= 40 行、watchdog 事件 1 行、state compact 默认 <= 200 行；完整事实写 evidence compact / 步骤 md / logs。
+
 ### Agent DAG、主控调度与非阻塞收割（硬规则）
 
 本 skill 必须采用 DAG 调度，而不是让 agent 彼此等待。
@@ -197,7 +220,7 @@ phase_runtime:
 1. 子 agent 必须把完整证据写入步骤 md 或 `logs/`，只向主控返回 compact 摘要。
 
 3. 只有主控可以向用户提问；子 agent 只能上报 `needs_user_confirmation`、`confirmation_topic`、`pending_confirmations_delta` 和候选项。
-4. 只有主控裁定最终状态；子 agent 只能给出 `final_status_recommendation`。
+4. 只有主控裁定最终迁移交付状态；子 agent 只能给出 `delivery_status_recommendation` / `final_status_recommendation`。`execution_status: completed` 或兼容字段 `status: completed` 只表示阶段执行完成，不代表功能迁移 completed。
 5. `migration-applier` 是唯一业务代码/资源写入 agent，避免多 agent 并发修改同一批文件。
 6. **manifest 与最终 compact 默认单一写入者。** 分析/规划/验证 agent 不应直接覆盖最终 manifest 的确认状态；它们只能写各自私有步骤产物和 compact，并返回 `status_delta` / `pending_confirmations_delta`。主控负责合并到 `源分析清单.md` / `迁移清单.md`；`final-report-writer` 只在最终收口时写最终状态和流程收敛字段。
 7. 若上下文、权限或任务规模不适合创建 agent team，可退化为 6 agent、旧 4 agent 或单会话执行，但仍必须遵守权限边界、compact、logs、待确认项和监控规则。
@@ -211,7 +234,7 @@ phase_runtime:
 11. **确认项不得被后续阶段静默清除。** 任何阶段发现或继承的待确认项，只有主控在用户明确答复后，或依据 `target-existing` / `user-specified` / `backend-doc` 等证据写入关闭记录后，才能关闭；否则最终 `迁移清单.md` 必须保留 open 的 `pending_confirmations`。
 12. **目标 feature 分支确认是目标侧门禁，不是源侧只读门禁。** 主控在启动目标侧 agent、对目标项目执行 stash / pull / checkout / 创建分支 / 业务修改之前，必须完成目标项目 feature 分支确认。源侧只读 agent 可在目标分支未确认时先行，但不得读取或修改目标项目业务文件。
 13. **Agent 不继承 main 完整上下文。** 主控启动每个阶段 agent 时，prompt 必须显式包含 `source_project`、`target_project`、`feature_name`、`feature_slug`、`source_analysis_dir`、`target_migration_dir`、当前已确认入口/边界、必须读取的 manifest/compact 文件、允许写入文件列表、是否允许修改业务代码，以及本阶段必须记录的 timing 字段。
-14. **Agent 返回必须包含耗时摘要，但默认可粗粒度。** 每个阶段 agent 返回给主控的 compact 摘要中必须包含 `timing` 和 `step_timings_summary`；只有慢操作、失败重试、回派修复或 detailed 监控模式下才必须返回完整 `step_timings`。若本轮未能精确记录，字段值写“未记录精确耗时”，不得编造。
+14. **Agent 返回必须包含机器可读摘要与耗时摘要。** 每个阶段 agent 返回给主控的 compact 摘要中必须包含 `phase_summary_json`、`timing` 和 `step_timings_summary`；Main 优先读取 `logs/phase-summary/<phase>-<agent>.summary.json`，再降级读取 state compact / evidence compact。只有慢操作、失败重试、回派修复或 detailed 监控模式下才必须返回完整 `step_timings`。若本轮未能精确记录，字段值写“未记录精确耗时”，不得编造。
 15. **Agent 内部步骤要可观测但不制造噪音。** 每个 agent 至少记录阶段总耗时、最慢步骤、慢因和证据路径；`source-resource-closure-analyzer`、`migration-applier`、`static-verifier` 这三个高成本阶段应优先记录更细的步骤耗时。
 
 ## 默认快速静态迁移策略（性能优化）
@@ -222,9 +245,10 @@ phase_runtime:
    - 第 7 步也不主动探测这些命令是否存在。
    - 不安装依赖，不为了验证修改开发环境。
    - 若用户明确要求编译/构建验证，才记录为人工编译复核需求。
-2. **代码闭包优先依赖 ts-graph MCP。**
+2. **代码闭包优先依赖 ts-graph MCP，但支持 degraded mode。**
    - ts-graph 负责 TS/JS 层面的静态依赖事实：runtime imports、type-only imports、symbol callers/callees、review context、blast radius。
    - `source-code-closure-analyzer` 在 ts-graph 可用且 graph 状态有效时，不得先大范围 grep / Read 追 import；应先用 ts-graph 缩小范围，再按需读取具体文件。
+   - 若 ts-graph 不可用、graph build/query 失败或缓存 stale，不得默认完全卡住源侧只读代码闭包；必须进入 `execution_mode: degraded`，使用 `rg` / Read / import 文本扫描 / 明确调用点搜索降级分析，并记录 `code_closure_confidence: partial`、`degraded_reasons`、`fallback_methods`、`final_status_cap`。
    - 不把 `cli-anything-cocoscreator` 当作代码闭包工具；CLI 只补 Cocos 序列化资源、Prefab、UUID、Scene 引用事实。
 3. **资源闭包与 Prefab 静态验证必须优先使用 `cli-anything-cocoscreator`。**
    - `asset deps` 用于展开 prefab / asset 的静态 outgoing 依赖。

@@ -1,4 +1,18 @@
-# 待确认项单一事实源
+# 待确认项
+
+## historical_only 关闭证据门禁（P2）
+
+最终报告或主控回扫历史 Markdown 时，不得仅凭正文中出现“历史 / 已处理 / historical_only”就关闭待确认项。任何被标记为 `historical_only` 的风险或确认项，必须同时具备：
+
+```yaml
+historical_only_close_gate:
+  status: closed | resolved | superseded
+  closed_by: controller | user | evidence
+  close_evidence: <path or user reply or controller event id>
+````
+
+缺少 `status`、`closed_by`、`close_evidence` 任一字段时，final-report-writer 必须把它列为 `open_suspect`，不得静默关闭。
+单一事实源
 
 ### 待确认项单一事实源
 

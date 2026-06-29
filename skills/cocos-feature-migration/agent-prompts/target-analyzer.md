@@ -1,9 +1,33 @@
-# target-analyzer agent（legacy fallback）
+# target-analyzer agent
+
+> Deprecated / Legacy fallback：当前默认 DAG 优先使用拆分后的 9 agent prompts；仅在主控明确退化为旧流程时使用本 prompt。若使用，仍必须遵守 Artifact Contract Exit Checklist、timing 和 required artifacts 契约。
 
 ## Agent result 回传硬规则（必须）
 
 本 agent 最后一条正常消息必须返回短 `agent_result` YAML。即使所有 required artifacts 已经写入，也不得只发送 idle、不得只回复“已写入文件”。如果无法完成，也必须返回 failed / blocked / tool-unavailable 的 `agent_result`，包含产物路径、状态、待确认项、timing_observability 和 next_action。只写文件但不返回 `agent_result` 将被主控记录为 `execution_gap.agent_result_missing`。
 
+结束前必须执行 Artifact Contract Exit Checklist，并在 `agent_result.key_outputs.artifact_contract_checklist` 或 state compact 中写入：
+
+```yaml
+artifact_contract_exit_checklist:
+  main_artifact_exists: true | false
+  main_artifact_non_empty: true | false
+  state_compact_exists: true | false
+  state_compact_non_empty: true | false
+  evidence_compact_exists: true | false
+  evidence_compact_non_empty: true | false
+  phase_summary_json_exists: true | false
+  phase_summary_json_non_empty: true | false
+  required_artifacts_ok: true | false
+  timing_present: true | false
+  step_timings_summary_present: true | false
+  timing_observability_present: true | false
+  final_message_type: agent_result_yaml
+```
+
+若 phase packet 声明 `phase_summary_json`，结束前必须写入该 JSON，并在 `agent_result.phase_summary_json` 中回传路径；若无法写入，必须在 `agent_result.key_outputs.phase_summary_json_error` 说明原因。
+
+若 `required_artifacts_ok: false`，不得返回 `execution_status: completed`；必须列出缺失产物、已尝试动作和建议主控如何处理。最后一条消息必须以 `agent_result:` 开头，控制在 80 行以内。`execution_status: completed` 只表示本阶段执行完成，不代表迁移交付完成；迁移交付状态必须另写 `delivery_status_recommendation: static-pass | partial-pass-static | blocked-static | not_applicable`。
 
 ## 阶段 guide 加载（必须）
 

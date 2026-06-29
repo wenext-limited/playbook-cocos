@@ -60,10 +60,44 @@ dry-run 必须尽量使用固定 schema，减少后续读取完整 Markdown：
 - target branch / commit；
 - `migration-dry-run.json` 与资源计划的 hash 或可追溯版本；
 - 每个关键 prefab 的路径、prefab hash、meta hash；
+- 每个关键 prefab 的 expected script、目标脚本 `.meta` uuid、prefab 文本中完整 uuid / 短 uuid / Cocos 序列化字段命中情况；
+- `script_binding_evidence: direct | secondary | missing | unknown`，以及 Missing Script 特征扫描结果；
 - `script_uuid_resolvable`、`asset_uuid_resolvable`；
 - missing / unresolved 计数和分类；
 - fonts / materials / spriteframes / coin_icons / default_avatars / child_prefabs / builtin_like 的公共 UUID 改绑审计结果；
 - 证据路径。
+
+
+脚本绑定证据必须按 `expected_scripts` 结构化记录，供第 7 步 cache-first 判定：
+
+```json
+{
+  "prefab": "assets/GameBundle/roulette/prefab/panel/PanelGeneralRank.prefab",
+  "prefab_hash": "sha256:...",
+  "meta_hash": "sha256:...",
+  "expected_scripts": [
+    {
+      "script": "assets/GameBundle/roulette/script/panel/PanelRankComponent.ts",
+      "script_meta": "assets/GameBundle/roulette/script/panel/PanelRankComponent.ts.meta",
+      "meta_uuid": "...",
+      "full_uuid_hit": true,
+      "short_uuid_hit": true,
+      "compressed_uuid_hit": false,
+      "serialized_script_field_hit": true,
+      "missing_script_signature_hit": false,
+      "binding_evidence": "direct | secondary | unknown | missing",
+      "evidence_snippets_path": "logs/prefab-script-binding-PanelGeneralRank.json"
+    }
+  ]
+}
+```
+
+判定口径：
+
+- `direct`：结构化索引、`asset refs` 或等价证据直接证明 prefab 绑定目标脚本。
+- `secondary`：prefab 文本命中 `.meta` 完整 uuid / 短 uuid / Cocos 脚本序列化字段，可支撑 L1 通过但仍建议编辑器 spot check。
+- `unknown`：只能证明脚本 `.meta` 存在，不能证明 prefab 绑定；第 7 步最高 `partial-pass-static`。
+- `missing`：脚本 `.meta` 缺失或 prefab 绑定明显缺失；第 7 步应 fail 或回派修复。
 
 第 6 步不需要为了生成该缓存而运行完整第 7 步验证，但凡已经做过的 CLI / 文本解析 / uuid 检查结果必须结构化写入缓存，供第 7 步 cache-first 使用。
 
@@ -189,9 +223,155 @@ dry-run 必须尽量使用固定 schema，减少后续读取完整 Markdown：
 - 若自检失败，不能报告“已完成迁移”；应继续修复或标记 `blocked-static` 风险。
 - 不允许只根据编辑动作或复制命令推断成功，必须以 Read / 搜索目标实物结果为准。
 
-#### 6.y Prefab UUID 闭合预检与修复策略（必做）
+在生成或刷新 `prefab-static-check-cache.json` 前，第 6 步应优先读取/局部刷新目标侧 Cocos reverse indexes：
 
-跨项目迁移 Prefab 时，第 6 步不能只复制 `.prefab` / `.meta` 后等待第 7 步发现问题；`migration-applier` 必须在迁移动作阶段先做一次 Prefab UUID 闭合预检，并尽量自动修复可确定的 L1 静态问题。
+```text
+<target_migration_dir>/logs/cocos/uuid-reverse-index.json
+<target_migration_dir>/logs/cocos/prefab-reverse-index.json
+<target_migration_dir>/logs/cocos/prefab-script-binding-index.json
+```
+
+允许在 `<target_migration_dir>/logs/tools/` 下生成只读临时脚本 `build-cocos-reverse-index.mjs` 或 `.py`，用于解析 `.meta`、Prefab 文本和 Cocos 3.8/3.7 脚本序列化字段。该脚本不得修改业务文件。若第 6 步修改了 prefab/meta/script/resource，只刷新 `migration-dry-run.json` 或 `migration-progress.json` 中记录的 changed_prefabs / changed_meta_files / changed_scripts / changed_resources 对应索引项。
+
+若本轮业务写入修改了 prefab/meta/script/resource，第 6 步必须把 changed files 写入 `migration-progress.json`，并在生成 `prefab-static-check-cache.json` 前按 reverse index tool protocol 执行 partial refresh：
+
+```yaml
+reverse_index_partial_refresh_after_step6:
+  required_when_any_changed:
+    - changed_prefabs nonempty
+    - changed_meta_files nonempty
+    - changed_scripts nonempty
+    - changed_resources nonempty
+  input_sources:
+    - migration-dry-run.json.copy_files / prefab_rebind / asset_mapping
+    - migration-progress.json.business_files_modified / resources_copied
+  tool_mode: partial
+  output_summary: logs/cocos/cocos-reverse-index.summary.json
+  must_record_in:
+    - migration-progress.json.reverse_index_refresh
+    - 迁移状态摘要.compact.md
+    - phase-summary JSON
+  on_partial_or_failed:
+    - continue with targeted fallback for changed critical prefabs/scripts
+    - record execution_gap.cocos_reverse_index_partial_refresh_failed
+    - do not mark index failure itself as business risk
+```
+
+
+
+1. `prefab-script-binding-index.json` 的 direct 证据；
+2. `uuid-reverse-index.json` + prefab 文本 full/short/compressed uuid 命中；
+3. Cocos 3.8/3.7 serialized script field 命中；
+4. targeted `cli-anything-cocoscreator asset uuid + asset refs`；
+5. 仍无法证明时才标记 unknown/missing。
+
+reverse index missing 本身不是业务风险；但如果关键 Prefab / expected script 因缺索引和 fallback 均无法证明绑定，必须按现有 prefab binding gate 降级或阻塞。
+
+
+
+##### 6.y.1 prefab binding repair fast path（性能优化 P0）
+
+##### 6.y.2 meta_uuid_null_policy（P0）
+
+`prefab-static-check-cache.json` 中 `expected_scripts[*].meta_uuid == null` 不得直接判定为脚本绑定 missing。必须先执行：
+
+1. 直接读取目标脚本 `.meta` 文件；
+2. 按 JSON 解析 `uuid`；
+3. 若 `.meta` 中存在 uuid，先更新 cache 的 `meta_uuid`，再继续检查 prefab binding；
+4. 只有 `.meta` 文件缺失、JSON 解析失败或 uuid 字段缺失时，才判定 `script_meta_missing`；
+5. 若 meta uuid 存在但 prefab 无绑定证据，则按 `missing` / `unknown` 调和规则继续判断。
+
+该策略用于避免 cache 解析 bug 把“meta uuid 存在但未写入 cache”误判为脚本缺失。
+
+
+一旦 `prefab_script_binding_preflight` 发现关键 Prefab expected script 为 `missing`，不得等完成全部迁移动作文档或第 7 步才处理；必须立即进入 fast path：
+
+```yaml
+prefab_binding_repair_fast_path:
+  trigger:
+    - critical expected script binding_evidence == missing
+    - script_uuid_resolvable == false
+  steps:
+    - collect source script uuid and target script meta uuid
+    - locate source prefab script component slots
+    - build unique old_uuid -> target_uuid map
+    - if deterministic: rewrite target prefab script uuid immediately
+    - rescan target prefab and update prefab-static-check-cache.json
+    - if still missing: stop business writes and return blocked/partial
+  timing_step: prefab binding repair fast path
+```
+
+该 fast path 必须早于 `self-check/docs writeback`，并在 `migration-progress.json.completed_steps` 中记录。若 fast path 成功，后续第 7 步应 cache-first 复验；若失败且是确定 missing，阻塞 06 -> 07。
+
+
+> missing/unknown 调和：`missing` 与 `unknown` 必须区分。关键 Prefab 脚本绑定确定 `missing`、目标脚本 `.meta` 缺失、或可确定断绑且 deterministic repair 失败时，必须阻塞 06 -> 07。若只是 `unknown`（脚本/meta 存在，但静态文本/CLI 无法证明绑定），且已执行 repair attempt、无唯一可安全改写位置、无 Missing Script 特征，则允许进入第 7 步 cache-first 复验，但必须设置 `final_status_max: partial-pass-static` 与 `status_cap: partial-pass-static`、`editor_prefab_binding_review_recommendation.must_not_run_automatically: true`，并不得声称支持 `static-pass`。
+
+06 -> 07 流程图若出现 missing / broken 分支，必须显式标注：`missing / script_uuid_resolvable=false / deterministic broken -> prefab binding repair fast path`；若出现 unknown 分支，必须显式标注：`Allow 07 with final_status_max=partial-pass-static; editor review required`，不得只写模糊的 `partial cap`。
+
+
+第 6 步不得把关键 Prefab 的脚本绑定问题留给第 7 步首次发现。`migration-applier` 在写入或刷新 `prefab-static-check-cache.json` 后，必须立即计算：
+
+```yaml
+prefab_script_binding_gate:
+  critical_prefab_scope:
+    - entry prefab
+    - main panel prefab
+    - list item prefab
+    - confirmed core boundary 中 expected_scripts 非空的 prefab
+  fail_signals:
+    - expected_scripts[*].binding_evidence in [missing, unknown]
+    - expected_scripts[*].meta_uuid is null
+    - script_uuid_resolvable == false
+    - serialized_script_field_hit == false AND full_uuid_hit == false AND short_uuid_hit == false AND compressed_uuid_hit == false
+  pass_signals:
+    - every critical expected script has binding_evidence in [direct, secondary]
+    - unknown_or_missing_count == 0 for critical_prefab_scope
+````
+
+若出现 `fail_signals` 且属于关键 Prefab，本 agent 必须进入 `prefab_binding_repair_mode`，不得直接结束并让 controller 进入第 7 步。
+
+`prefab_binding_repair_mode` 必须执行：
+
+1. 读取源 Prefab、目标 Prefab、源脚本 `.meta`、目标脚本 `.meta`；
+2. 建立 `old_script_uuid -> target_script_uuid` 映射；
+3. 只有映射一一对应且 Prefab 与 expected script 关系唯一时，才允许文本级改绑；
+4. 改绑后重扫目标 Prefab，更新 `prefab-static-check-cache.json`、`migration-progress.json`、`迁移状态摘要.compact.md` 和 phase-summary JSON；
+5. 若重扫后关键 expected script 仍为 `missing/unknown`，必须返回 `execution_status: blocked | partial`、`blocks_next_phase: true`。
+
+允许确定性自动修复的条件：
+
+- 源 Prefab 中能定位旧脚本 uuid 或等价 serialized script 字段；
+- 目标 TS 文件存在；
+- 目标 TS `.meta` uuid 存在；
+- old uuid -> target uuid 映射唯一；
+- Prefab path 与 expected script 的职责关系唯一；
+- 修复只影响本次迁移新增/复制的目标 Prefab。
+
+禁止自动修复的条件：
+
+- 同一旧 uuid 对应多个候选目标脚本；
+- Prefab 内无可定位脚本组件槽位；
+- 目标 Prefab 结构与源 Prefab 差异导致挂载位置不确定；
+- 需要打开 Cocos 编辑器才能判断节点/组件语义；
+- 修复会覆盖目标项目已有非本次迁移的手工 Prefab 结构。
+
+禁止自动修复时，必须写：
+
+```yaml
+prefab_script_binding_preflight:
+  status: fail | partial
+  blocks_next_phase: true
+  unknown_or_missing_count: <n>
+repair_recommendations:
+  - ...
+editor_prefab_binding_review_recommendation:
+  must_not_run_automatically: true
+````
+
+只有当关键 Prefab 的 expected scripts 全部达到 `direct` 或 `secondary`，或能证明 remaining unknown/missing 全部不属于 confirmed core boundary，才允许返回 `execution_status: completed` 并建议进入第 7 步。
+
+
+跨项目迁移 Prefab 时，第 6 步不能只复制 `.prefab` / `.meta` 后等待第 7 步发现问题；`migration-applier` 必须在迁移动作阶段先做一次 Prefab UUID 闭合预检，尤其是 **prefab script binding preflight**，并尽量自动修复可确定的 L1 静态问题。
 
 预检范围至少包括：
 
@@ -212,7 +392,74 @@ dry-run 必须尽量使用固定 schema，减少后续读取完整 Markdown：
 
 若第 6 步已能确定并修复的 `.meta` 缺失、资源 uuid 不可解析、同职责资源改绑问题，不应留到最终验证才处理；第 7 步主要负责复验和发现遗漏。
 
+脚本绑定预检必须对每个关键 Prefab 建立 `expected_scripts` 清单，来源包括源资源闭包、UIConfig/route、Prefab component index、代码闭包中的 Panel/Item/Component 职责层。每个 expected script 至少检查：
+
+1. 目标 TS 文件是否存在；
+2. 目标 TS `.meta` 是否存在且包含 uuid；
+3. 目标 Prefab 文本中是否命中完整 uuid、短 uuid、compressed/短 id 或 Cocos 脚本序列化字段；
+4. 是否出现 Missing Script / 空脚本引用 / 源项目旧 uuid 残留等特征；
+5. 若使用 `cli-anything-cocoscreator asset uuid + asset refs`，是否直接证明脚本被目标 Prefab 引用。
+
+处理策略：
+
+- `direct` / `secondary` 证据充分：写入 `prefab-static-check-cache.json.expected_scripts[*].binding_evidence`，第 7 步可 cache-first 复验；
+- `unknown`：只证明脚本 `.meta` 存在但不能证明 Prefab 绑定，必须写入 `repair_recommendations` 和 editor spot check 建议，最终最高 `partial-pass-static`；
+- `missing`：关键脚本 `.meta` 缺失、Prefab 内无可证明绑定或命中 Missing Script 特征时，必须在第 6 步优先修复；若无法确定修复，不得声称迁移动作完成可进入 `static-pass`，应标记 `blocked-static` 风险或请求主控回派/确认。
+
+确定性修复边界：
+
+- 只有当旧 uuid、目标脚本、目标 `.meta` uuid、目标 Prefab 位置存在一一对应关系时，才允许文本级修复 Prefab 脚本 uuid；
+- 若同一旧 uuid 可能对应多个目标脚本、或 Prefab 结构无法确认，禁止静默改写 Prefab，必须输出候选映射和 `must_not_run_automatically: true` 的人工编辑器复核建议；
+- 不得自动打开 Cocos 编辑器；编辑器 spot check 只作为后续人工复核建议。
+
+第 6 步结束前，`prefab-static-check-cache.json` 必须能回答“关键 Prefab 是否绑定到期望脚本”。若无法生成完整缓存，必须在 `06-迁移动作记录.md`、`迁移状态摘要.compact.md` 和 `agent_result` 中写明 `prefab_script_binding_preflight_status: partial | unavailable`、缺失 Prefab、缺失脚本和下一步修复建议。
+若发现 Cocos 内置 / builtin-like unresolved 线索，第 6 步只记录为预检风险或缓存分类线索，不直接给最终通过结论。第 6 步只产出迁移动作事实和 `prefab-static-check-cache.json`，不直接合成 `static_status_breakdown` / `final_status_synthesis.downgrade_reasons`；但必须把入口视觉（第 7 步字段名为 `entry_visual_integration`）、公共 UUID、过渡资源和 builtin-like 相关风险结构化写入 compact，供第 7 步合成最终矩阵。
+
+
+#### 6.z 返回 compact 必须包含脚本绑定预检摘要
+
+`迁移状态摘要.compact.md` 和 `agent_result.key_outputs` 必须包含：
+
+```yaml
+prefab_script_binding_preflight:
+  status: pass | partial | fail | unavailable
+  checked_prefab_count:
+  direct_or_secondary_count:
+  unknown_or_missing_count:
+  repair_recommendations_count:
+  cache_path: prefab-static-check-cache.json
+```
+
+若 `unknown_or_missing_count > 0`，必须同步写 `repair_recommendations` 和 `editor_prefab_binding_review_recommendation.must_not_run_automatically: true`。
 
 #### 6.z Timing 精确记录补充（硬规则）
 
+##### 6.z.0 step timing split hard schema（性能优化 P0）
+
+第 6 步必须真实拆分以下 timing step，不能只写总耗时或用 0/1 秒占位：
+
+```yaml
+required_timing_steps:
+  - dry-run
+  - code/import rewrite
+  - resource/meta copy
+  - config/event/protocol/SubGame integration
+  - prefab uuid precheck/rebind
+  - prefab binding repair fast path
+  - self-check/docs writeback
+```
+
+每个 step 必须有 `step_start`、`step_end.duration_seconds`、`status`、`output_or_evidence`。若某 step 本轮无需执行，写 `status: skipped` 和原因。若总耗时 >=120 秒而上述 step 缺失或 duration 明显不覆盖 wall time，必须在 `迁移状态摘要.compact.md` 和 phase-summary JSON 写：
+
+```yaml
+timing_observability:
+  step_granularity_insufficient: true
+  missing_required_timing_steps: []
+```
+
+`self-check/docs writeback` 超过 180 秒时，必须 minimal-first 写 phase-summary/state compact 后返回，允许 controller helper 补长文档。
+
+
 第 6 步是高成本写入阶段，必须遵守 Timing Bootstrap / Step / Close 协议。每个 `step_end.duration_seconds` 必须由该 step 的 start/end 时间计算；除非真实小于 1 秒，不得写 0。若无法取得精确 step 耗时，必须写 `timing_observability.unavailable_reason`，不得用 0 伪装成功记录。
+
+即使 `timing_mode: standard`，migration-applier 也必须至少记录以下步骤边界：`dry-run`、`code/import rewrite`、`resource/meta copy`、`config/event/protocol/SubGame integration`、`prefab uuid precheck/rebind`、`self-check/docs writeback`。若总耗时超过 120 秒但这些步骤缺失或都记录为 0/1 秒，必须标记 `step_granularity_insufficient`。

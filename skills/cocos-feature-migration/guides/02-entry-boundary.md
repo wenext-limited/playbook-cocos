@@ -89,6 +89,43 @@
 
 主控必须把这些选项整理给用户确认；用户确认前不得进入第 3~7 步。用户确认后，必须把 `confirmed_entry`、`confirmed_boundary`、`included_modules`、`excluded_modules` 写入 `源分析清单.md` 和 `源侧摘要.compact.md`，后续第 3~7 步只能以这个确认边界为准。
 
+#### 2.x.1 authoritative closure hard gate（P0）
+
+第 2 步的确认结果是第 3/4 步 authoritative source closure 的硬前置。若入口或边界未确认，后续分析只能作为候选收集，不能作为正式迁移闭包。
+
+```yaml
+entry_boundary_authoritative_gate:
+  owner: controller
+  required_before:
+    - 03-source-code-closure
+    - 04a-source-resource-prefetch
+    - 04b-source-resource-closure
+  pass_when:
+    - confirmed_entry exists
+    - confirmed_boundary exists
+    - included_modules/excluded_modules recorded
+    - needs_user_confirmation == false
+    - no open confirmation_topic in [exact-entry, feature-boundary]
+    - boundary_confidence: high-evidence | user-confirmed | fresh-confirmed-cache
+    - if boundary_confidence == high-evidence: evidence_paths are explicit and there is only one plausible boundary
+  block_when:
+    - multiple plausible entries and no user selection
+    - multiple plausible boundaries and no user selection
+    - any unclosed signal: 待确认 / 可选子功能 / 边界不清 / 相邻功能 / 不默认纳入
+  allowed_while_blocked:
+    - readonly candidate collection
+    - cache freshness check
+    - write 02 candidate artifacts
+  forbidden_while_blocked:
+    - start authoritative 03/04 closure
+    - mark source summary as confirmed
+    - treat a recommended option as user-confirmed
+```
+
+主控若发现 02 只给出推荐项但用户尚未选择，不得用推荐项自动推进 03/04。必须先向用户展示 2~4 个选项并等待确认；用户确认后才允许写入 `confirmed_entry`、`confirmed_boundary`、`included_modules`、`excluded_modules`，并清除 exact-entry / feature-boundary open confirmation。
+
+流程图和 phase gate 文案应使用 `Feature boundary confirmed or evidence-high?`，不得使用容易被误读为主观判断的 `confident?`。其中 `evidence-high` 只允许用于 `single plausible boundary + explicit evidence paths + no open signals`：即唯一合理入口/边界、存在显式证据路径、且没有 `待确认` / `可选子功能` / `边界不清` / `相邻功能` / `不默认纳入` 等未关闭信号；agent recommendation / recommended option 不等于 user confirmation。
+
 要求：
 
 - 若边界不清，必须暂停并向用户确认，不得自行扩大范围。

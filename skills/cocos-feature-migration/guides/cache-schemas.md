@@ -9,7 +9,7 @@
 ```json
 {
   "version": 1,
-  "schema_name": "prefab-static-check-cache | source-resource-closure-cache | target-capability-index | source-entry-closure-cache | uuid-reverse-index | asset-deps-cache | resource-path-index",
+  "schema_name": "prefab-static-check-cache | source-resource-closure-cache | target-capability-index | source-entry-closure-cache | uuid-reverse-index | asset-deps-cache | resource-path-index | phase-summary",
   "feature_slug": "jackpot_rank",
   "project_path": "/abs/path/project",
   "project_role": "source | target",
@@ -250,6 +250,7 @@ cache_usage:
 
 失效条件：indexed roots 内 `.meta` 文件新增、删除、内容 hash 变化；target commit 变化且无法证明 root hash 未变。
 
+
 ## 7. target-capability-index.json
 
 用于第 5 步目标公共能力复用。
@@ -317,6 +318,20 @@ cache_usage:
       "path": "assets/.../Panel.prefab",
       "prefab_hash": "sha256:...",
       "meta_hash": "sha256:...",
+      "expected_scripts": [
+        {
+          "script": "assets/.../Panel.ts",
+          "script_meta": "assets/.../Panel.ts.meta",
+          "meta_uuid": "...",
+          "full_uuid_hit": true,
+          "short_uuid_hit": true,
+          "compressed_uuid_hit": false,
+          "serialized_script_field_hit": true,
+          "missing_script_signature_hit": false,
+          "binding_evidence": "direct | secondary | unknown | missing",
+          "evidence_snippets_path": "logs/prefab-script-binding-panel.json"
+        }
+      ],
       "script_uuid_resolvable": true,
       "asset_uuid_resolvable": true,
       "missing_count": 0,
@@ -333,6 +348,25 @@ cache_usage:
         "child_prefabs": "pass | partial-pass | failed | not_checked",
         "builtin_like": "pass | review-required | failed | not_present"
       },
+      "entry_visual_integration": {
+        "status": "pass | partial | fail | not_applicable",
+        "visible_entry": true,
+        "i18n_key_complete": true,
+        "formal_icon_resource": true,
+        "click_route_closed": true,
+        "placeholder_or_empty_icon": false,
+        "evidence_paths": []
+      },
+      "transitional_resource_decisions": [
+        {
+          "asset": "assets/.../rank_deps/foo.png",
+          "current_dependents": ["assets/.../Panel.prefab"],
+          "target_equivalent": "assets/.../common/foo.png or null",
+          "decision": "rebind-target-existing | move-to-stable-feature-dir | keep-transitional-with-review | remove-after-rebind",
+          "reason": "",
+          "phase7_review_required": true
+        }
+      ],
       "evidence_paths": []
     }
   ],
@@ -342,6 +376,11 @@ cache_usage:
 ```
 
 失效条件：target commit 变化、prefab/meta hash 变化、migration dry-run/resource plan/target diff hash 变化、target public resource uuid 变化、unresolved 从已分类变为 unknown、schema 不兼容。
+
+
+读取方判定：`binding_evidence=direct|secondary` 可支撑 `prefab_script_binding: pass`；`unknown` 最高 partial；`missing` 应 fail 或回派修复。若 cache 中缺少 `expected_scripts`，读取方必须把该缓存最多判定为 `partial`。
+
+读取方必须把 `prefab-static-check-cache` 转换为第 7 步 `migration-static-check.json` 的 `static_status_breakdown` 和 `final_status_synthesis.downgrade_reasons` 输入，但不得只凭缓存直接给最终状态；职责级验证、保真验证和待确认项回扫仍必须执行。
 
 ## 9. builtin-like-unresolved-allowlist.json
 

@@ -17,6 +17,30 @@ step7_controller:
     returns: short_agent_result
 ```
 
+
+## 第 7 步新增结构化要求
+
+```yaml
+step7_structured_requirements:
+  static_verifier_cache_first:
+    prefab_static_check_cache_expected_scripts: required_when_available
+    binding_evidence_values: [direct, secondary, unknown, missing]
+    pass_when: direct_or_secondary
+    partial_when: unknown
+    fail_when: missing
+  final_report_monitoring:
+    required_skill_update_fields:
+      - should_update_skill_md
+      - should_update_agent_prompts
+      - should_update_timing_protocol
+      - should_update_static_verifier_rules
+      - rule_gap
+      - execution_gap
+      - tooling_gap
+      - recommended_patch_tasks
+  final_message: short_agent_result_yaml
+```
+
 ## main 只关心的判定字段
 
 ```yaml
@@ -29,20 +53,46 @@ step7_status_gate:
     cli_rerun_prefab_count:
   static_status_breakdown:
     code_import_symbol:
+    ui_config_event_protocol:
     asset_deps_business_missing:
     prefab_script_binding:
     public_uuid_rebind:
+    builtin_like_unresolved:
+    entry_visual_integration:
+    dynamic_resource_paths:
     responsibility_equivalence:
     fidelity:
   open_confirmations:
   repair_recommendations:
-  editor_prefab_binding_review_recommendation:
+  final_status_synthesis:
+    final_status:
+    status_cap:
+    downgrade_reasons:
+      - code:
+        category: tooling_degraded | artifact_contract | source_boundary | target_branch_gate | entry_semantics | fidelity_semantics | code_static | resource_static | prefab_script_binding | public_uuid_rebind | builtin_like_unresolved | responsibility_equivalence | agent_coordination
+        severity: note | partial | blocking
+        source_dimension:
+        evidence_paths: []
+        user_facing_summary:
+        recovery:
+  downgrade_reason_taxonomy_required: true
+  missing_reasons_gap: execution_gap.final_status_reason_missing
+  prefab_binding_review:
+    present: yes | no
+    must_not_run_automatically: true
+  resource_governance_review:
+    present: yes | no
+  entry_visual_integration:
+    status: pass | partial | fail | not_applicable
+  builtin_like_unresolved:
+    status: pass | review-required | fail | not_present
+    source: builtin-like allowlist / cache / cli unresolved classification
 ```
 
 ## 默认边界
 
 - 默认只执行 L1 静态验证。
-- `static-verifier` 必须 cache-first：优先复用 `prefab-static-check-cache.json` / `migration-static-check.json` / `asset-deps-summary.json`；只有 cache missing / stale / unknown 的 prefab 才允许调用完整 CLI deps/refs。
+- cache / CLI / ts-graph 不足时进入 verification degraded mode，使用 rg/Read、Prefab 文本 uuid、`.meta` reverse index、`prefab-static-check-cache.json` 降级复验；能证明主链静态闭合但缺 editor/public uuid 完整证据时收敛为 `partial-pass-static`，不得无限等待工具或编辑器。
 - 不主动探测 / 运行 tsc、cocos、npm build、npm typecheck。
 - Prefab 绑定编辑器复核只作为人工复核建议，不作为 skill 阶段自动执行。
 - 第 7 步完成后默认静态迁移交付流程即结束，不因编译、编辑器和运行态人工复核未执行而悬挂。
