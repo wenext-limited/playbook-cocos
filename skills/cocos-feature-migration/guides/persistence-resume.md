@@ -1,4 +1,5 @@
 # 持久化、Resume 与 Markdown 写回
+> 术语索引：state_bootstrap 表示主控预创建 running state；artifact_harvest 表示恢复时按 required artifacts + phase-summary JSON + state compact 收割。
 
 ## 结果持久化 / Resume 规则
 
@@ -75,10 +76,31 @@
 - `最终状态摘要.compact.md`：最终验证 compact 摘要
 - `controller-checkpoint.compact.md`：主控轻量 checkpoint，用于 main 上下文压缩、跨对话恢复和避免在聊天中维护完整历史状态
 - `logs/controller-event-log.jsonl`：主控结构化调度事件日志，用于跨对话恢复和最终监控复盘
+- `logs/artifact-contract-manifest.json`：主控维护的机器可读 artifact path schema，用于 phase start / harvest / resume 校验 canonical required artifacts，避免 agent 写错路径造成假缺失
 - `05x-target-shared-search.compact.json`：第 5 步目标共享检索包
 - `migration-dry-run.json`：第 6 步迁移动作 dry-run 计划
 - `migration-static-check.json`：第 7 步机器可读 L1 静态验证结果
+- `logs/phase-summary/<phase>-<agent>.summary.json`：阶段机器可读摘要，Resume / Main controller 默认优先读取，减少 Markdown 上下文
 - `logs/`：长命令输出、构建日志、资源依赖树等原始证据
+
+
+### Resume 读取优先级（v2）
+
+恢复任务时，Main/controller 不应默认展开完整 Markdown。读取顺序必须为：
+
+```text
+controller-checkpoint.compact.md
+  -> logs/artifact-contract-manifest.json（轻量校验 required artifacts canonical path）
+  -> logs/phase-summary/<phase>-<agent>.summary.json
+  -> 当前阶段 *.state.compact.md
+  -> evidence compact
+  -> full step md / logs
+```
+
+只有 phase-summary JSON 缺失、stale、字段不足、与 state compact 冲突、存在 open confirmation、required artifacts 缺失或用户要求展开时，才下钻 Markdown。若 JSON 与 compact 冲突，按更保守状态处理，并在 `使用效果监控.md` 记录 `execution_gap.phase_summary_conflict:<phase>`。
+
+恢复时还必须保留 `execution_mode: normal | degraded`、`degraded_reasons`、`confidence_caps`、`source_resource_prefetch`、`target_05_fanout` 等字段；不要把 degraded 的历史阶段恢复成 normal。
+
 
 ### 源分析清单.md 必填字段
 
@@ -141,8 +163,36 @@ controller_checkpoint:
   workflow_status: running | static-pass | partial-pass-static | blocked-static | blocked | completed | partial | abandoned
   open_confirmations: 0
   active_agents: []
+  active_agent:
+    name:
+    agent_id:
+    phase:
+    status: pending | running | harvesting | completed | completed_with_agent_output_missing | agent_output_missing | failed | blocked | superseded
+    started_at:
+    lease_status: active | expired | completed | superseded
+    restart_count: 0
+    last_heartbeat_path:
+    last_heartbeat_at:
+    current_step:
+  watchdog:
+    enabled: true | false
+    tool: Monitor | Bash | unavailable
+    task_id:
+    status: scheduled | running | completed | timeout | unavailable
+    next_checkpoint_at:
+    soft_timeout_at:
+    last_event:
   pending_agent_shutdowns: []
+  superseded_agents: []
+  required_artifacts:
+    declared: []
+    existing: []
+    missing: []
   required_artifacts_pending: []
+  harvest_policy:
+    on_idle_without_agent_result: check_artifacts
+    on_checkpoint: check_artifacts
+    on_soft_timeout: prompt_once_then_restart_or_block
   final_status:
   last_user_decision:
   source_analysis_ref:
@@ -161,6 +211,23 @@ controller_checkpoint:
 2. main 恢复任务时优先读取 checkpoint + `迁移清单.md`；只有二者冲突、缺失或 stale 时才读多个完整 compact。
 3. checkpoint 不能替代 manifest / compact / 步骤 md；它只用于调度和压缩 main 上下文。
 4. checkpoint 中不得粘贴完整代码清单、完整资源清单或完整 CLI 输出。
+
+### Resume 时的可靠调度恢复
+
+恢复或继续任务时，main 不得依赖聊天历史判断 agent 是否完成。必须按以下顺序恢复：
+
+1. 读取 `controller-checkpoint.compact.md`。
+2. 读取 `迁移清单.md` 的 `phase_runtime` 必要片段。
+3. 若 checkpoint 显示有 active agent，读取当前阶段 state compact；若 state 缺失，再读 heartbeat。
+4. 检查 checkpoint 中 declared required artifacts，并优先用 `logs/artifact-contract-manifest.json` 做 canonical path / alias / 非空轻量校验。
+5. 若 artifacts + state compact 完整，按 `completed_with_agent_output_missing` 或 `agent_harvest` 收割，并立即执行 DAG transition 原子推进：更新 checkpoint / event log / artifact manifest，bootstrap 并启动下一阶段 agent，安排 watchdog。不得只写 `next_action` 后暂停。
+6. 若 artifacts 缺失但 heartbeat fresh 且未超时，继续等待 watchdog。
+7. 若 heartbeat stale 或 soft timeout，执行追问一次 / 重启一次 / 阻塞规则。
+9. 若恢复时发现 checkpoint / manifest / 迁移清单显示 `next_action` 指向可启动阶段，但 `active_agents` 为空或缺少预期 agent，且无 hard stop / blocking confirmation，必须判定为 `controller_transition_gap`：立即补做下游阶段 bootstrap + Agent 启动 + watchdog，并写入 `logs/controller-event-log.jsonl`；不得只向用户汇报“下一步将启动”。
+10. 对 `04 completed -> 05x -> 05a/05b/05c`，恢复时若 `05x-target-shared-search.compact.json` 已存在且 fresh、目标分支门禁已关闭、05a/05b/05c 产物缺失且无 active agents，必须立即启动 05a/05b/05c fan-out；不得把 05x 当作完成态停留。
+
+
+旧产物没有 heartbeat 时，不得判定失败；应记录 `legacy_no_heartbeat: true`，然后按 required artifacts + state compact 继续。
 
 ### Controller event log（main 调度历史外置）
 
@@ -305,8 +372,17 @@ phase_runtime:
   last_completed_phase: 07-final-report
   workflow_status: static-pass | partial-pass-static | blocked-static
   active_agents: []
+  active_agent: null
+  watchdog:
+    enabled: false
+    status: completed
   pending_agent_shutdowns: []
-  required_artifacts: []
+  superseded_agents: []
+  required_artifacts:
+    declared: []
+    existing: []
+    missing: []
+  required_artifacts_pending: []
   output_mode: compact_plus_logs
   merge_owner: final-report-writer
   user_confirmation_owner: controller

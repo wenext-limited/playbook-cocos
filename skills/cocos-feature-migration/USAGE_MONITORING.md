@@ -1,5 +1,57 @@
 # Cocos Feature Migration Skill Usage Monitoring
 
+## 2026-06 v2 调度与监控补充
+
+本监控规范必须覆盖 v2 调度优化，除原有阶段质量外，新增监控以下字段：
+
+```yaml
+monitoring_quality:
+  execution_mode: normal | degraded
+  degraded_reasons: []
+  final_status_cap:
+  scheduling_optimization:
+    source_resource_prefetch: used | skipped | failed | unavailable
+    target_05_fanout: used | fallback-two-stage | skipped
+    fallback_reasons: []
+  phase_summary_json:
+    status: fresh | stale | missing | unavailable
+    missing_phases: []
+    conflicts: []
+  controller_helper:
+    completions: []
+    unresolved_gaps: []
+  prefab_script_binding_preflight:
+    status: pass | partial | fail | missing | unavailable
+    checked_in_step6: true | false
+    first_detected_in_step7: true | false
+    direct_or_secondary_count:
+    unknown_or_missing_count:
+  controller_timing:
+    checked: true | false
+    missing_phases: []
+    total_duration_missing_phases: []
+    step_granularity_insufficient_phases: []
+  controller_merge_resolution:
+    merge_status: completed | partial | blocked
+    conflict_count:
+    blocking_conflict_count:
+    unresolved_conflict_count:
+    evidence_precedence_used: []
+    step6_merge_gate: pass | blocked | partial
+    unresolved_conflicts: []
+```
+
+评分补充：
+
+- `phase_summary_json` 缺失但 Markdown compact 完整：轻扣；若导致 Main 读取完整步骤 md / logs：中扣。
+- 已触发 04a / 05 fan-out 且产物完整：加分；因 05x 缺失回退两段式：记录 `fallback-two-stage`。
+- ts-graph / CLI 不可用进入 degraded mode 不直接扣阻塞分；若降级后仍虚假给 `static-pass`，按严重问题扣分。
+- `controller_helper` 成功补齐缺失 compact / summary JSON：记录为恢复成功；若 helper 仍需 Main 展开大日志，记录上下文控制问题。
+- `final_status_synthesis.downgrade_reasons` 必须使用结构化 taxonomy，category 只能为 `tooling_degraded | artifact_contract | source_boundary | target_branch_gate | entry_semantics | fidelity_semantics | code_static | resource_static | prefab_script_binding | public_uuid_rebind | builtin_like_unresolved | responsibility_equivalence | agent_coordination`；最终状态不是 `static-pass` 时至少 1 条，缺失则记录 `execution_gap.final_status_reason_missing`。
+- 第 6 步未做 `prefab_script_binding_preflight`，到第 7 步才发现关键脚本绑定缺失：阻塞级扣分。
+
+---
+
 ## 1. Purpose
 
 This document defines how to monitor real `cocos-feature-migration` runs, so future iterations can improve the skill workflow, constraints, tool usage, persistence quality, and final migration success rate.
@@ -249,7 +301,7 @@ code_closure_completeness =
 监控分为 `standard` 和 `detailed` 两档，避免监控本身拖慢迁移流程。
 
 - `standard`：默认等级，适用于正常完成、小任务、阶段性阻塞和中断恢复。
-- `detailed`：仅在用户要求性能复盘、出现明显慢操作、流程阻塞、回派修复超过 1 次、大型迁移任务或 compact/timing 冲突时启用。
+- `detailed`：仅在用户要求性能复盘、出现明显慢操作、流程阻塞、回派修复超过 1 次、大型迁移任务或 compact/timing 冲突时启用。若出现 `agent_output_missing`、`restart_once`、任一 agent wall time > 10 分钟、最终状态不是 `static-pass`、第 6/7 步降级或回派、`step_granularity_insufficient`，必须自动升级为 detailed 或至少追加 detailed appendix。
 
 如果本轮没有精确记录，不得编造，必须写“未记录精确耗时”。
 
@@ -262,6 +314,9 @@ standard 监控至少覆盖：
 | 会话级 | `started_at`、`ended_at`、`final_status`、`monitoring_level=standard`、总评分 |
 | Agent 级 | agent 名称、是否启动、状态、总耗时、最慢步骤摘要、慢点摘要 |
 | 慢操作 | Top 3 或影响最大的慢点；无精确耗时时可按阻塞/重试/工具慢点列出 |
+| 失控/等待/重启 TopN | agent_output_missing、superseded、wait-user、wait-main 等非有效工作耗时单独列出 |
+| 有效工作 TopN | 工具、分析、写入、验证等真实工作步骤单独列出，避免与失控等待混排 |
+| 模块化评分 | 前置检查、入口边界、代码闭包、资源闭包、目标差异、迁移动作、静态验证、最终收口分别评分并列扣分原因 |
 | 硬门禁 | ts-graph、cli-anything、Git 快速预检、目标分支确认、入口/边界确认、语义确认 |
 | 待确认项 | open、本轮关闭、影响最终状态的确认项 |
 | Compact 质量 | 只列缺失、stale、冲突或不足以支撑下一阶段的 compact |
@@ -860,3 +915,36 @@ P2 = 主要改善可读性、报告质量或小幅减少耗时
 3. **可恢复与可验证**：跨对话能否继续，最终结果能否被验证和接手。
 
 只要每次迁移都能留下可评分、可复盘、可对比的 `使用效果监控.md`，后续就能基于真实失败模式持续优化该 skill，而不是凭感觉修改规则。
+
+
+### recommended_patch_tasks 输出要求
+
+`skill_update_assessment` 应输出 `recommended_patch_tasks`，把 rule_gap / execution_gap / tooling_gap 转换成可执行补丁任务，包含 target_file、change_type、priority、reason。
+
+
+#### skill_update_assessment 可执行补丁任务
+
+监控中的 `skill_update_assessment` 不得只写 yes/no/partial；若 `should_update_skill_md`、`should_update_agent_prompts`、`should_update_timing_protocol` 任一为 yes/partial，必须补充：
+
+```yaml
+recommended_patch_tasks:
+  - priority: P0 | P1 | P2
+    target_file: guides/... | agent-prompts/... | SKILL.md | tooling
+    change_type: rule | prompt | timing | schema | tooling
+    reason:
+    suggested_change:
+```
+
+`rule_gap` 表示规则本身缺失；`execution_gap` 表示规则已有但执行偏差；`tooling_gap` 表示需要新增/增强结构化产物、索引或验证 fast path。
+
+
+#### Agent 输出缺失术语
+
+```yaml
+agent_output_terms:
+  completed_with_agent_output_missing: "产物完整但未正常返回短 agent_result"
+  agent_output_missing: "产物或 state compact 缺失，追问/重启后仍无有效输出"
+  agent_result_missing: "deprecated alias；新监控应归并到 completed_with_agent_output_missing"
+```
+
+监控评分时，`completed_with_agent_output_missing` 属协作质量扣分但不阻塞流程；`agent_output_missing` 属阶段产物缺失风险，应按阻塞/重启问题扣分。

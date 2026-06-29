@@ -36,7 +36,7 @@
 - Agent DAG / phase_runtime 摘要：当前阶段、active_agents、required_artifacts、output_mode、agent-output-missing / completed_with_agent_output_missing 次数、merge_owner、user_confirmation_owner
 - 第 5 步 DAG 执行情况：05a 是否先行完成，05b/05c 是否在 05a 后并行，是否使用 fresh `05x-target-shared-search.compact.json` 触发提前并行例外
 - Controller event log：是否生成 `logs/controller-event-log.jsonl`，关键事件是否覆盖 phase_start / agent_harvest / completed_with_agent_output_missing / user_confirmation_closed / phase_complete / repair_round
-- 结构化产物链路：`05x-target-shared-search.compact.json`、`migration-dry-run.json`、`migration-static-check.json` 是否存在、fresh、被后续阶段读取
+- 结构化产物链路：`05x-target-shared-search.compact.json`、`migration-dry-run.json`、`prefab-static-check-cache.json`、`migration-static-check.json` 是否存在、fresh、被后续阶段读取
 - Final manifest 收口：`phase_runtime.current_phase=completed`、`active_agents=[]`、`required_artifacts=[]` 是否写回；失败时记录 `execution_gap.manifest_phase_runtime_not_closed`
 - 关键证据路径：`迁移清单.md`、`源分析清单.md`、步骤 md、`迁移总结.md` 等
 - 发现的问题、用户反馈、优化建议、是否需要更新 `SKILL.md`
@@ -61,6 +61,8 @@ monitoring_quality:
     prefab_script_binding:
     public_uuid_rebind:
     builtin_like_unresolved:
+    entry_visual_integration:
+    dynamic_resource_paths:
     responsibility_equivalence:
     fidelity:
   target_diff_merge_check:
@@ -71,6 +73,14 @@ monitoring_quality:
     includes_migration_constraints_for_step6:
     includes_resource_decision_reason:
     no_conflicting_status_between_05a_05b_05c:
+  controller_merge_resolution:
+    merge_status: completed | partial | blocked
+    conflict_count:
+    blocking_conflict_count:
+    unresolved_conflict_count:
+    evidence_precedence_used: []
+    step6_merge_gate: pass | blocked | partial
+    unresolved_conflicts: []
   workflow_convergence:
     default_static_delivery_finished: yes | no | blocked
     active_background_agents: []
@@ -84,15 +94,82 @@ monitoring_quality:
     rule_gap: []
     execution_gap: []
     tooling_gap: []
+    recommended_patch_tasks: []
   structured_artifacts:
+    artifact_contract_manifest: fresh | stale | missing | unavailable
+    artifact_schema_validation: pass | partial | fail | unavailable
+    artifact_path_mismatch_count:
     shared_search_bundle: fresh | stale | missing | unavailable
     migration_dry_run: fresh | stale | missing | unavailable
+    prefab_static_check_cache: fresh | stale | missing | unavailable
+    builtin_like_allowlist: fresh | stale | missing | unavailable # builtin-like unresolved 分类缓存
     migration_static_check: fresh | stale | missing | unavailable
-    controller_event_log: present | missing
+    phase_summary_json: fresh | stale | missing | unavailable
+    controller_helper_completions: []
+    phase_summary_conflicts: []
   manifest_phase_runtime_closed: true | false
+    execution_mode: normal | degraded
+    degraded_reasons: []
+    final_status_cap:
+  scheduling_optimization:
+    source_resource_prefetch: used | skipped | failed | unavailable
+    target_05_fanout: used | fallback-two-stage | skipped
+    fallback_reasons: []
+  prefab_script_binding_preflight:
+    status: pass | partial | fail | missing | unavailable
+    checked_in_step6: true | false
+    first_detected_in_step7: true | false
+    cache_path: prefab-static-check-cache.json
+    direct_or_secondary_count:
+    unknown_or_missing_count:
+  controller_timing:
+    checked: true | false
+    missing_phases: []
+    total_duration_missing_phases: []
+    step_granularity_insufficient_phases: []
 ```
 
+
+入口视觉、公共 UUID 与人工复核建议也必须结构化记录，避免 partial 状态原因丢失：
+
+```yaml
+l1_review_followups:
+  entry_visual_integration:
+    status: pass | partial | fail | not_applicable
+    placeholder_or_empty_icon: true | false
+    formal_icon_resource: true | false
+    evidence_paths: []
+  prefab_binding_review:
+    present: true | false
+    target_prefabs: []
+    must_not_run_automatically: true
+  resource_governance_review:
+    present: true | false
+    transitional_dirs: []
+    unresolved_public_uuid_rebind: []
+  final_status_synthesis:
+    final_status: static-pass | partial-pass-static | blocked-static
+    status_cap:
+    downgrade_reasons:
+      - code:
+        category: tooling_degraded | artifact_contract | source_boundary | target_branch_gate | entry_semantics | fidelity_semantics | code_static | resource_static | prefab_script_binding | public_uuid_rebind | builtin_like_unresolved | responsibility_equivalence | agent_coordination
+        severity: note | partial | blocking
+        source_dimension:
+        evidence_paths: []
+        user_facing_summary:
+        recovery:
+    taxonomy_valid: true | false
+    missing_reasons_gap: execution_gap.final_status_reason_missing
+```
+
+若最终状态不是 `static-pass`，`downgrade_reasons` 必须至少 1 条；若状态是 `partial-pass-static` 但没有维度级 partial/review-required 证据，应记录 `execution_gap.final_status_reason_missing`。
+
 评分建议：`completed_with_agent_output_missing_count` 为 0 不扣分，1 次轻扣，2 次中等扣分，>=3 次应在 `execution_gap` 中明确建议强化对应 agent prompt；若同时存在 required artifacts 缺失，则按阻塞级协作问题扣分。
+
+Prefab 脚本绑定预检评分建议：若第 6 步已生成 fresh `prefab-static-check-cache.json` 且关键 Prefab 的 `binding_evidence` 均为 `direct` / `secondary`，不扣分；若第 6 步只给 `unknown` 或缓存字段不足，记为轻/中扣并输出 editor review；若第 6 步未做预检、到第 7 步才首次发现关键脚本绑定缺失，必须记录 `execution_gap.prefab_script_binding_preflight_missing` 或 `tooling_gap.prefab_script_binding_repair_needed`，阻塞级问题按 `blocked-static` 风险扣分。
+
+Controller timing 评分建议：若 controller/manual completion 阶段缺 timing JSONL，记录 `controller_timing_missing:<phase>`；若缺 `agent_end.total_duration_seconds`，记录 `controller_timing_total_duration_missing:<phase>`；若总耗时 >=120 秒但 step 覆盖不足，记录 `controller_step_granularity_insufficient:<phase>`。这些不必阻塞迁移交付，但必须进入 `skill_update_assessment.execution_gap`。
+
 
 Agent 协作风险必须额外记录阶段 agent 是否违反默认非 worktree 规则：
 
@@ -147,3 +224,54 @@ worktree_isolation_deviation:
 如果因为缺少目标项目路径而无法确定保存目录，则应先询问用户目标项目路径；若用户只是测试 skill 或未进入真实迁移任务，可说明本次未生成项目级 `使用效果监控.md`，并说明原因。
 
 > 完整监控评分规范仍保留在 `USAGE_MONITORING.md`；只有进入最终报告或阻塞监控写回时才读取。
+
+
+
+#### Timing 评分细化（P2 规则）
+
+`step_granularity_insufficient` 只应用于高成本阶段或明显需要性能复盘的阶段，不应把所有长 wall time 都当作 prompt 缺陷。
+
+推荐判定：
+
+```yaml
+timing_granularity_rule:
+  high_cost_phases: [03-source-code-closure, 04-source-resource-closure, 05a-target-capability, 05b-fidelity-risk, 05c-resource-plan, 06-migration-applier, 07-static-verifier, final-report-writer]
+  insufficient_when:
+    - total_duration_seconds >= 120
+    - sum_recorded_step_duration_seconds / total_duration_seconds < 0.6
+  classify_separately:
+    - agent_wall_time_high
+    - active_step_coverage_low
+    - tool_wait_unattributed
+    - docs_writeback_over_budget
+    - final_report_timing_aggregation_partial
+```
+
+若 `agent_end.total_duration_seconds` 精确存在，但 step 覆盖不足，应记录 `active_step_coverage_low:<agent>`；若 heartbeat 显示卡在文档补写，应记录 `docs_writeback_over_budget:<agent>`；若 final-report 降级 timing 聚合，应记录 `final_report_timing_aggregation_partial`。这些默认不阻塞迁移交付，只影响监控评分和 prompt 优化建议。
+
+#### skill_update_assessment 可执行补丁任务
+
+监控中的 `skill_update_assessment` 不得只写 yes/no/partial；若 `should_update_skill_md`、`should_update_agent_prompts`、`should_update_timing_protocol` 任一为 yes/partial，必须补充：
+
+```yaml
+recommended_patch_tasks:
+  - priority: P0 | P1 | P2
+    target_file: guides/... | agent-prompts/... | SKILL.md | tooling
+    change_type: rule | prompt | timing | schema | tooling
+    reason:
+    suggested_change:
+```
+
+`rule_gap` 表示规则本身缺失；`execution_gap` 表示规则已有但执行偏差；`tooling_gap` 表示需要新增/增强结构化产物、索引或验证 fast path。
+
+
+#### Agent 输出缺失术语
+
+```yaml
+agent_output_terms:
+  completed_with_agent_output_missing: "产物完整但未正常返回短 agent_result"
+  agent_output_missing: "产物或 state compact 缺失，追问/重启后仍无有效输出"
+  agent_result_missing: "deprecated alias；新监控应归并到 completed_with_agent_output_missing"
+```
+
+监控评分时，`completed_with_agent_output_missing` 属协作质量扣分但不阻塞流程；`agent_output_missing` 属阶段产物缺失风险，应按阻塞/重启问题扣分。
