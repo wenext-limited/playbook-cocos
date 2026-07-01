@@ -40,6 +40,7 @@ playbook-cocos/
 │   ├── cocos-localization/SKILL.md        # 多语言本地化
 │   ├── cocos-coin-animation/SKILL.md      # 贝塞尔曲线飞币动画
 │   ├── cocos-data-persistence/SKILL.md    # 数据持久化与缓存策略
+│   ├── cocos-playbook-pr-submit/SKILL.md  # 提交 playbook-cocos 变更到 PR
 │   ├── oops-framework/SKILL.md            # OOPS 框架核心（12 子模块）
 │   ├── oops-ecs-pattern/SKILL.md          # ECS 三层架构
 │   ├── oops-event-system/SKILL.md         # 事件系统与消息分发
@@ -48,8 +49,9 @@ playbook-cocos/
 ├── agents/
 │   └── cocos-developer.md                 # Cocos 开发代理角色定义
 ├── docs/
-│   ├── architecture-overview.md           # 项目架构全景（含 MVVM/动画链/频率分布）
-│   └── usage-guide.md                     # 项目使用说明书
+│   ├── 架构总览.md                         # 项目架构全景（含 MVVM/动画链/频率分布）
+│   ├── AI本机安装说明.md                   # 给 AI 投喂的本机安装说明
+│   └── 使用说明.md                         # 项目使用说明书
 └── skills/cocos-project-setup/new_project_code/ # 新项目基础代码模板
     ├── README.md                          # 模板快速开始
     ├── TECHNICAL_DOC.md                   # 模板详细技术文档
@@ -76,6 +78,7 @@ playbook-cocos/
 | `cocos-localization` | 多语言本地化工作流 |
 | `cocos-coin-animation` | 贝塞尔曲线飞币动画、多方向路径、对象池 |
 | `cocos-data-persistence` | 三层存储架构、前缀隔离、内存缓存 |
+| `cocos-playbook-pr-submit` | 将本地 `playbook-cocos` 变更提交到 `feat/xxx` 分支并创建合并到 `origin/main` 的 PR |
 
 ### OOPS 框架技能（`oops-` 前缀）
 
@@ -105,7 +108,9 @@ playbook-cocos/
 
 ## 使用说明
 
-详细的使用方法请参阅 [使用说明书](docs/usage-guide.md)，涵盖快速开始、创建新项目、AI 代理配置和知识库扩展等内容。
+详细的使用方法请参阅 [使用说明书](docs/使用说明.md)，涵盖快速开始、创建新项目、AI 代理配置和知识库扩展等内容。
+
+如需将本知识库安装到本机用户级目录并投喂给 AI，请参阅 [本机安装说明（给 AI 投喂）](docs/AI本机安装说明.md)。
 
 ## 贡献指南
 
