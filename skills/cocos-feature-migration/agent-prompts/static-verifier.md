@@ -202,11 +202,12 @@ confidence_caps:
    - 若命中 direct 或 secondary 证据，应把 `script_binding_evidence` 写入 `migration-static-check.json`，并允许 `prefab_script_binding: pass`；只有 unknown 才降级 partial，missing 才 fail/回派。
 7. 写入 `migration-static-check.json`：按 `guides/07-static-verifier-final.md` 的标准 schema 输出机器可读 L1 检查结果；若无法生成，必须在 `07-迁移验证.md` 与 `最终状态摘要.compact.md` 中记录 `execution_gap.migration_static_check_missing`。
 8. 做入口视觉接入检查：目标侧可见入口、用户确认入口语义、未替换原入口、文案 key、正式 icon、click handler / localOpenUI / route、placeholder / TODO / 空 iconUrl。
-9. 做公共资源 UUID 改绑审计：字体、材质、SpriteFrame、coin 图标、默认头像、子 prefab、builtin-like 资源的 copy / reuse / rebind 证据；对 `file=None` unresolved 分类为 builtin-like / missing-business-resource / unknown。若 unresolved UUID 命中 guide 中 builtin-like UUID 映射缓存（例如 default_ui button normal/pressed/disabled），必须记录 uuid、builtin 路径和映射来源，但仍输出 editor review 建议。
-10. 做职责级验证：关键职责层是否存在、是否职责等价、事件链/配置链/初始化链是否断裂。
-11. 做保真验证：API path、activity/task、native/KV/config/gating、old/new interface、request 参数、event 闭环。
-12. 按最终状态判定矩阵推荐 `static-pass` / `partial-pass-static` / `blocked-static`：入口视觉未正式接入、公共资源 UUID 未全量审计、unknown unresolved、KV 仅有静态链但缺运行态证明时，不得过度乐观判定为 `static-pass`。
-13. 若存在可自动修复 L1 问题，必须输出固定结构的 `repair_recommendations` 给主控回派 `migration-applier`。`migration-static-check.json` 与 compact 必须包含 `static_status_breakdown` / 结构化 `final_status_synthesis.downgrade_reasons`，并使用 `entry_visual_integration` 字段记录入口视觉维度。`downgrade_reasons` 必须采用 `downgrade_reason_taxonomy`：每项包含 `code`、`category`、`severity`、`source_dimension`、`evidence_paths`、`user_facing_summary`、`recovery`；category 只能使用 `tooling_degraded | artifact_contract | source_boundary | target_branch_gate | entry_semantics | fidelity_semantics | code_static | resource_static | prefab_script_binding | public_uuid_rebind | builtin_like_unresolved | responsibility_equivalence | agent_coordination`。若最终状态不是 `static-pass` 但没有降级原因，必须记录 `execution_gap.final_status_reason_missing`。
+9. 做关键 Prefab `__uuid__` 闭合检查：优先读取 `prefab-static-check-cache.json.prefab_uuid_closure`；缓存缺失/stale 时，对入口 Prefab、主面板 Prefab、列表项 Prefab 和 confirmed core boundary Prefab 做文本扫描，剥离 `@subid` 后用目标 `.meta` reverse index 反查。`missing-business-resource` 必须 fail/blocked，`public-resource-unrebound` 或 `unknown` 至少 partial，只有 `builtin-like/editor-only` 可作为 review note。
+10. 做公共资源 UUID 改绑审计：字体、材质、SpriteFrame、coin 图标、默认头像、子 prefab、builtin-like 资源的 copy / reuse / rebind 证据；对 `file=None` unresolved 分类为 builtin-like / missing-business-resource / unknown。若 unresolved UUID 命中 guide 中 builtin-like UUID 映射缓存（例如 default_ui button normal/pressed/disabled），必须记录 uuid、builtin 路径和映射来源，但仍输出 editor review 建议。
+11. 做职责级验证：关键职责层是否存在、是否职责等价、事件链/配置链/初始化链是否断裂。
+12. 做保真验证：API path、activity/task、native/KV/config/gating、old/new interface、request 参数、event 闭环。
+13. 按最终状态判定矩阵推荐 `static-pass` / `partial-pass-static` / `blocked-static`：入口视觉未正式接入、关键 Prefab `__uuid__` 未闭合、公共资源 UUID 未全量审计、unknown unresolved、KV 仅有静态链但缺运行态证明时，不得过度乐观判定为 `static-pass`。
+14. 若存在可自动修复 L1 问题，必须输出固定结构的 `repair_recommendations` 给主控回派 `migration-applier`。`migration-static-check.json` 与 compact 必须包含 `static_status_breakdown` / 结构化 `final_status_synthesis.downgrade_reasons`，并使用 `entry_visual_integration` 字段记录入口视觉维度。`downgrade_reasons` 必须采用 `downgrade_reason_taxonomy`：每项包含 `code`、`category`、`severity`、`source_dimension`、`evidence_paths`、`user_facing_summary`、`recovery`；category 只能使用 `tooling_degraded | artifact_contract | source_boundary | target_branch_gate | entry_semantics | fidelity_semantics | code_static | resource_static | prefab_script_binding | public_uuid_rebind | builtin_like_unresolved | responsibility_equivalence | agent_coordination`。若最终状态不是 `static-pass` 但没有降级原因，必须记录 `execution_gap.final_status_reason_missing`。
    - `file_path`
    - `issue_type`: import | symbol | dto | event | ui-config | resource-path | prefab-uuid | asset-missing | i18n | semantic | other
    - `exact_symbol_or_prefab`
@@ -271,6 +272,15 @@ confidence_caps:
   - default_avatars:
   - child_prefabs:
   - builtin_like:
+- prefab_uuid_closure:
+  - status:
+  - checked_prefab_count:
+  - total_uuid_count:
+  - missing_count:
+  - public_unrebound_count:
+  - builtin_like_count:
+  - unknown_count:
+  - missing_items:
 - final_status_matrix_decision:
   - recommended_status:
   - status_cap:
@@ -278,7 +288,7 @@ confidence_caps:
     - code:
       category:
       severity:
-      source_dimension:
+      source_dimension: code_import_symbol | ui_config_event_protocol | asset_deps_business_missing | prefab_script_binding | public_uuid_rebind | prefab_uuid_closure | builtin_like_unresolved | entry_visual_integration | dynamic_resource_paths | responsibility_equivalence | fidelity | workflow
       evidence_paths:
       user_facing_summary:
       recovery:

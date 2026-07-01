@@ -45,6 +45,37 @@ dry-run 必须尽量使用固定 schema，减少后续读取完整 Markdown：
 - 发现 overwrite-risk、UUID 冲突、目标已有同职责资源但无法判断是否复用时，应写入待确认项或在第 5 步补充分析，不得静默覆盖。
 - dry-run 输出超过 100 行时写入 `logs/`，`06-迁移动作记录.md` 只保留摘要和路径。
 
+#### 6.0.w copy manifest preflight 与无关资源审计（P0）
+
+实际复制任何资源前，`migration-applier` 必须把 `migration-dry-run.json.copy_files` 视为 copy manifest，并执行准入检查。每个 `decision: copy` 的资源必须具备：
+
+```json
+{
+  "source": "",
+  "target": "",
+  "source_uuid": "",
+  "canonical_source_path": "",
+  "included_by": [],
+  "boundary_status": "must_copy | rebind_required",
+  "excluded_boundary_check": {
+    "checked": true,
+    "excluded_modules_hit": [],
+    "excluded_resource_paths_hit": [],
+    "excluded_referenced_by": []
+  },
+  "same_basename_disambiguation": []
+}
+```
+
+准入规则：
+
+- `source_uuid`、`canonical_source_path`、`included_by` 或 `boundary_status` 缺失时，不得复制该资源。
+- basename 在源项目存在多个候选时，必须确认选中的 `source_uuid` 被 included boundary 引用；否则 block/skip。
+- 命中 `excluded_modules`、excluded boundary 或 `excluded_resource_paths` 的资源不得复制。
+- 禁止使用 basename、目录 glob 或“copy all same name”生成实际复制列表。
+
+复制完成后必须执行 `extraneous_copied_resource_audit`：遍历本轮新增资源，检查它是否被核心 Prefab UUID 闭包、included dynamic load、UIConfig/route 或迁入代码 import/reference 引用。无法证明引用且存在 excluded chain / 同名误带证据的资源，必须标记 `extraneous_copied_resource`；不得进入 `static-pass`，并应在安全时回滚本 agent 本轮复制的无关资源，或写明需人工清理。
+
 #### 6.0.x Prefab 静态验证缓存（第 7 步加速必做）
 
 在实际复制 / 改绑 Prefab 和资源后，`migration-applier` 必须尽量写入：
@@ -65,6 +96,7 @@ dry-run 必须尽量使用固定 schema，减少后续读取完整 Markdown：
 - `script_uuid_resolvable`、`asset_uuid_resolvable`；
 - missing / unresolved 计数和分类；
 - fonts / materials / spriteframes / coin_icons / default_avatars / child_prefabs / builtin_like 的公共 UUID 改绑审计结果；
+- 每个关键 Prefab 的 `__uuid__` 全量闭合检查结果：`raw_uuid`、剥离 `@subid` 后的 `base_uuid`、目标 `.meta` 命中资产、分类、处理策略、missing 计数；
 - 证据路径。
 
 
@@ -101,6 +133,62 @@ dry-run 必须尽量使用固定 schema，减少后续读取完整 Markdown：
 
 第 6 步不需要为了生成该缓存而运行完整第 7 步验证，但凡已经做过的 CLI / 文本解析 / uuid 检查结果必须结构化写入缓存，供第 7 步 cache-first 使用。
 
+#### 6.0.y 关键 Prefab `__uuid__` 目标侧闭合预检（P0 必做）
+
+`prefab-static-check-cache.json` 不能只回答脚本是否绑定，还必须回答关键 Prefab 内所有序列化资源 UUID 是否能在目标项目解析。此检查用于捕获 `@property(Prefab)`、字体、材质、SpriteFrame、默认头像、coin 图标等被 Prefab 字段直接引用但未在文件名清单中出现的资源。
+
+执行时机：迁移 Prefab/资源和局部刷新目标 reverse index 后、返回第 6 步结果前。
+
+范围：confirmed core boundary 内的入口 Prefab、主面板 Prefab、列表项 Prefab，以及 `critical_prefab_uuid_refs` 或资源计划中列出的所有关键 Prefab。
+
+检查规则：
+
+1. 读取目标 Prefab 文本，提取全部 `__uuid__`；对 `<uuid>@<subid>` 必须剥离为 `base_uuid` 后再查目标 `.meta`。
+2. 用目标 `uuid-reverse-index.json` 或 `.meta` 文本索引反查 `base_uuid`；命中 `.meta` 即认为目标侧有可解析资产，再按 raw/subid 记录子资源证据。
+3. 未命中项必须继续与源侧 `critical_prefab_uuid_refs`、05c 资源计划、builtin-like allowlist 对照，分类为 `missing-business-resource | public-resource-unrebound | builtin-like | unknown`。
+4. 对 `missing-business-resource` 或确定可复制的独立资源，必须在第 6 步补迁资源和 `.meta`，保持或改绑 UUID 后重扫；典型对象包括独立子 Prefab、字体、材质、SpriteFrame/Texture、默认头像、coin 图标。
+5. 对目标已有同职责公共资源，优先改绑到目标资源 UUID；若无法安全改绑，必须写 `public-resource-unrebound` 和 `editor_prefab_binding_review_recommendation.must_not_run_automatically: true`，最终最高 `partial-pass-static`。
+6. builtin-like/editor-only 项可不阻塞，但必须记录映射来源、uuid 和人工编辑器复核建议。
+
+缓存最低字段：
+
+```json
+{
+  "prefab_uuid_closure": {
+    "status": "pass | partial | fail | unavailable",
+    "checked_prefab_count": 0,
+    "total_uuid_count": 0,
+    "unique_base_uuid_count": 0,
+    "resolved_count": 0,
+    "missing_count": 0,
+    "builtin_like_count": 0,
+    "unknown_count": 0,
+    "target_uuid_index_status": "fresh | partial | stale | missing | unavailable",
+    "prefabs": [
+      {
+        "prefab_path": "",
+        "prefab_hash": "sha256:...",
+        "uuid_refs": [
+          {
+            "raw_uuid": "",
+            "base_uuid": "",
+            "target_asset_path": "",
+            "target_meta_path": "",
+            "asset_type": "prefab | script | font | material | spriteframe | texture | atlas | audio | json | builtin-like | unknown",
+            "resolution": "target-meta-hit | copied-with-meta | rebound-to-target | builtin-like | missing | unknown",
+            "classification": "business-resource | public-resource | builtin-like | editor-only | unknown",
+            "blocks_static_pass": false,
+            "evidence_path": ""
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+若关键 Prefab 的 `prefab_uuid_closure.missing_count > 0` 且不是 builtin-like/editor-only，必须先修复；无法修复时返回 `execution_status: blocked | partial`，并在 `phase_gate.reasons` 使用 `category: resource_static` 或 `public_uuid_rebind`。
+
 #### 6.1 代码迁移
 
 - 新建目标项目缺失的业务 TS 文件
@@ -117,7 +205,28 @@ dry-run 必须尽量使用固定 schema，减少后续读取完整 Markdown：
 
 #### 6.1.x 业务语义改写保护（必做）
 
-执行代码迁移时，必须遵守“源行为保真优先”。对第 5 步标记为 `inferred`、`高风险可疑`、`需确认` 的以下改动，不得静默落地：
+执行代码迁移时，必须遵守“源行为保真优先”，并在落地时禁止 AI 自行发挥。默认策略是：**业务语义和 feature 私有实现照源保真；只做必要目标适配**。
+
+允许不额外确认的必要适配仅限：
+
+- import 路径；
+- bundle 名、UI 注册路径、资源根路径；
+- 目标项目已有公共能力接入，例如通用头像、远程图片、列表组件、语言系统、资源加载工具；
+- 用户已明确确认的目标业务常量。
+
+除上述必要适配外，不得无证据改写源 feature 相关：
+
+- 字符串常量、接口地址、deeplink path；
+- 枚举值、静态字段结构、默认值；
+- request 参数、query 参数、DTO 字段；
+- appName / platform / old-new-interface 分支逻辑；
+- native / KV / remote config / gating 链；
+- event 定义、派发、监听关系；
+- 关键方法结构、getter/setter 结构、条件判断。
+
+任何“看起来应该适配目标项目”的改动，必须先有 `user-specified`、`target-existing` 或 `backend-doc` 证据；没有证据时保持源值 / 源结构，并把建议适配写入待确认项。该规则在迁移动作时生效，不要求新增迁移后全量 diff 流程。
+
+对第 5 步标记为 `inferred`、`高风险可疑`、`需确认` 的以下改动，更不得静默落地：
 
 - API / deeplink path 改写；
 - `activityType` / `businessType` / `taskType` / `taskData` 改写；
@@ -197,6 +306,7 @@ dry-run 必须尽量使用固定 schema，减少后续读取完整 Markdown：
 | 工具适配文件 | 新增 helper 方法是否实际存在 | 记录方法名列表 |
 | Prefab / 资源 | 关键 prefab、资源、`.meta` 是否存在 | 记录存在性摘要；完整 deps 留到第 7 步 |
 | Prefab UUID 闭合预检 | 跨项目复制 prefab 后，新增 TS 是否有 `.meta`、prefab 内脚本 uuid 是否能映射到目标脚本 `.meta`、字体/材质/Sprite/子 prefab uuid 是否能映射到目标资源 `.meta` | 记录 `script_meta_present`、`script_uuid_resolvable`、`asset_uuid_resolvable`；能自动改绑/同步的应在第 6 步先修复 |
+| Prefab `__uuid__` 全量闭合 | 关键 Prefab 文本中的所有 `__uuid__` 是否剥离 `@subid` 后能在目标 `.meta` 反查闭合 | 记录 `prefab_uuid_closure.missing_count`、缺失 uuid 分类、补迁/复用/改绑动作；非 builtin-like 缺失不得留到第 7 步首次发现 |
 | 新增入口资源 | 若迁移新增独立入口，入口注册位置、文案 key、icon 来源、点击行为、是否替换原入口、是否存在 placeholder / TODO / 空 iconUrl 是否明确 | 记录入口资源自检表；icon 仍为占位时必须写入 `remaining_risks` 并提示第 7 步降级 |
 
 新增入口资源自检建议格式：

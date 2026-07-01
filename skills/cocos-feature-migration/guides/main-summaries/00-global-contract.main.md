@@ -32,8 +32,23 @@ main_runtime_contract:
       private_outputs_only: true
       final_merge_owner: controller
     target_business_code_and_assets: migration-applier only
+    migration_apply_fidelity_first:
+      default: preserve_source_behavior_and_structure
+      applies_during: 06-migration-applier
+      no_post_diff_required: true
+      allowed_without_extra_evidence:
+        - import path adaptation
+        - bundle name / UI registration / resource root adaptation
+        - target-existing common capability hookup
+      forbidden_without_evidence:
+        - rewrite source feature string constants
+        - rewrite API/deeplink paths
+        - rewrite enum values or request parameters
+        - rewrite defaults, branch logic, static field structure, key method structure
+      required_evidence_for_changes: [user-specified, target-existing, backend-doc]
+      fallback_when_no_evidence: keep_source_value_and_structure_or_open_confirmation
     target_branch_confirmation_menu:
-      format: plain_text_numbered_menu
+      format: plain_text_letter_menu
       must_not_compress_to_binary_choice: true
       always_include_when_confirmation_needed:
         - continue-current-local-branch
@@ -52,6 +67,7 @@ main_runtime_contract:
       show_existing_migration_branch_when_detected: true
       remote_options_policy: "may be shown as 选择后校验; run readonly remote validation only after user selects"
       menu_item_requirement: "creation options must name the base ref explicitly"
+      reply_policy: "用户可回复 A/B/C... 或完整策略文本；不得使用 1/2/3 作为可回复选项"
     controller_merge_resolution:
       phase: 05-controller-merge
       evidence_precedence: [user-specified, backend-doc, target-existing, source, static-tool, inferred, unknown]
@@ -94,6 +110,7 @@ scheduling_reliability_gate:
     fallback: Bash run_in_background one-shot
     emits: one_line_events_only
     triggers_harvest: true
+    unavailable_policy: "Monitor 与 Bash fallback 都不可用、task_id 丢失/不可查、或 checkpoint 过期时，不得 wait_watchdog；resume/checkpoint 必须立即 artifact_harvest"
   artifact_harvest:
     triggers: [agent_result, idle_notification, watchdog_event, user_status_question, resume]
     default_reads: [controller-checkpoint.compact.md, current_state_compact]
@@ -114,6 +131,15 @@ scheduling_reliability_gate:
       condition: "checkpoint.next_action points to launchable phase AND active_agents empty AND no hard_stop AND no blocking confirmation"
       action: "immediately bootstrap/launch downstream phase, append event log, record in usage monitoring"
     critical_chain_05: "04 completed -> 05x generated -> 05a/05b/05c fan-out must be one atomic transition when target branch gate is closed"
+  compaction_resume_handshake:
+    triggers: [context_compaction, resume, interruption, long_gap_status_question]
+    first_action: "读取 controller-checkpoint.compact.md + artifact-contract-manifest.json + 迁移清单 phase_runtime + 当前阶段 state compact"
+    forbidden: "凭聊天记忆继续执行"
+    active_agents_policy: "active_agents[] 是唯一活动 agent 事实源；历史 active_agent 只兼容读取为 active_agents[0]，不得写回为主状态"
+  durability_barrier:
+    required_before: [ask_user, spawn_agent, dag_transition, business_write, final_response]
+    required_after: [user_confirmation_closed, agent_spawned, agent_harvested, business_write, phase_completed]
+    writes: [checkpoint, manifest_phase_runtime, current_state_compact, controller_event_log]
   artifact_contract_schema:
     path: <target_migration_dir>/logs/artifact-contract-manifest.json
     owner: controller
@@ -203,5 +229,7 @@ controller_timing_gate:
 - main 对 agent 收割必须有界：idle-only 立即查产物；缺产物最多追问一次；仍失败则补做 / 重启一次 / 阻塞，不得卡住整流程。
 - main 执行 DAG transition 必须原子推进：阶段产物完成且无 hard_stop / blocking confirmation 时，必须同轮更新 checkpoint/event log/manifest、bootstrap 并启动下一阶段 agent、安排 watchdog；不得只写 `next_action`、只生成 05x 等中间产物、或等用户追问才继续。
 - main 恢复或被用户询问状态时，若发现 `controller_transition_gap`（checkpoint 指向可启动阶段、active_agents 为空、无阻塞），必须立即补启动并记录 gap 到 event log / 使用效果监控。
+- main 恢复时若 watchdog 不可用、不可查询或已过 checkpoint/soft timeout，不得等待 watchdog；必须立刻 artifact harvest，再按产物完整性推进、追问、重启或阻塞。
+- main 判断并行阶段必须遍历 `active_agents[]`；05a/05b/05c 任一缺失、superseded 或未收割都不得被单个 `active_agent` 覆盖。
 - main 默认读取预算：`controller-checkpoint.compact.md` + 当前阶段 `*.state.compact.md` + manifest 80 行以内必要片段 + 短 `agent_result`。完整 Markdown 读取优先 limit 400~800 行。
 - main 调度历史写入 `<target_migration_dir>/logs/controller-event-log.jsonl`，事件包括 `phase_start`、`agent_harvest`、`completed_with_agent_output_missing`、`user_confirmation_closed`、`phase_complete`、`repair_round`。

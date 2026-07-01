@@ -60,6 +60,7 @@ monitoring_quality:
     asset_deps_business_missing:
     prefab_script_binding:
     public_uuid_rebind:
+    prefab_uuid_closure:
     builtin_like_unresolved:
     entry_visual_integration:
     dynamic_resource_paths:
@@ -147,6 +148,13 @@ l1_review_followups:
     present: true | false
     transitional_dirs: []
     unresolved_public_uuid_rebind: []
+  prefab_uuid_closure:
+    status: pass | partial | fail | not_checked
+    checked_prefab_count:
+    missing_count:
+    public_unrebound_count:
+    unknown_count:
+    evidence_paths: []
   final_status_synthesis:
     final_status: static-pass | partial-pass-static | blocked-static
     status_cap:

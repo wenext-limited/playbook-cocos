@@ -87,7 +87,7 @@
 | A | 只迁入口浮层 | 完整榜单页 / jackpot pool 本体 | 范围最小，但功能闭环可能不足 | 否/是 |
 | B | 入口浮层 + 总榜单页面 | jackpot pool 本体链路 / 中奖弹窗 | 保留榜单主闭环，避免扩大到主 jackpot 链路 | 是 |
 
-主控必须把这些选项整理给用户确认；用户确认前不得进入第 3~7 步。用户确认后，必须把 `confirmed_entry`、`confirmed_boundary`、`included_modules`、`excluded_modules` 写入 `源分析清单.md` 和 `源侧摘要.compact.md`，后续第 3~7 步只能以这个确认边界为准。
+主控必须把这些选项整理给用户确认；迁移范围/功能边界菜单必须使用 `A/B/C/...` 字母选项，并提示“直接回复字母或文本即可”，不得使用 `1/2/3/...` 数字选项。用户确认前不得进入第 3~7 步。用户确认后，必须把 `confirmed_entry`、`confirmed_boundary`、`included_modules`、`excluded_modules` 写入 `源分析清单.md` 和 `源侧摘要.compact.md`，后续第 3~7 步只能以这个确认边界为准。
 
 #### 2.x.1 authoritative closure hard gate（P0）
 

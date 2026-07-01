@@ -130,7 +130,7 @@
 
 ### 调度可靠性增强协议（硬规则）
 
-本 skill 的 DAG 调度必须具备 `checkpoint + state bootstrap + heartbeat + watchdog + artifact harvest + DAG transition` 六件套，确保主控不依赖用户追问或 agent 自述推进。
+本 skill 的 DAG 调度必须具备 `checkpoint + state bootstrap + heartbeat + watchdog + artifact harvest + DAG transition` 六件套，并额外假设 main 对话会在任意时刻自动压缩。调度事实必须落在磁盘产物中，确保主控不依赖用户追问、agent 自述或聊天记忆推进。
 
 ```yaml
 reliable_scheduler:
@@ -138,18 +138,23 @@ reliable_scheduler:
   state_bootstrap: controller writes running state before each Agent
   heartbeat: agent updates logs/heartbeat/<phase>-<agent>.heartbeat.json
   watchdog: controller schedules Monitor or Bash background one-shot
+  watchdog_unavailable_policy: unavailable/task_id_missing/task_unqueryable/checkpoint_overdue -> immediate artifact_harvest, never wait_watchdog
   artifact_harvest: controller checks required artifacts + state compact on every wake
   dag_transition: controller advances phase when artifacts are complete and no open gate
+  compaction_resume_handshake: read checkpoint + manifest + phase_runtime + current state compact before doing work after compaction/resume
+  durability_barrier: write checkpoint + manifest + state compact + event log around every user decision / agent spawn / transition / business write
 ```
 
 要求：
 
 1. **state bootstrap**：主控启动 agent 前必须预创建 `state_compact_artifact`，写入 `status: running`、`phase_runtime`、`required_artifacts_pending`、`heartbeat_path`、`watchdog_status`。
 2. **heartbeat**：agent 启动后必须尽快写 heartbeat，并在关键 step 更新 `current_step`、`completed_steps`、`last_output_path`、`updated_at`。heartbeat 只保存调度信息，不保存完整证据。
-3. **watchdog**：主控启动 agent 后必须安排 bounded watchdog；优先 `Monitor`，不可用时用 `Bash(run_in_background=true)` one-shot fallback。watchdog 只输出 checkpoint / completed / soft_timeout / failed 单行事件。
+3. **watchdog**：主控启动 agent 后必须安排 bounded watchdog；优先 `Monitor`，不可用时用 `Bash(run_in_background=true)` one-shot fallback。watchdog 只输出 checkpoint / completed / soft_timeout / failed 单行事件。若 Monitor 与 Bash fallback 都不可用、`task_id` 丢失/不可查询，或 checkpoint / soft timeout 已过期，必须写 `watchdog.status=unavailable` 与 `resume_cursor.safe_resume_action=harvest`；恢复时不得等待 watchdog，必须立即 artifact harvest。
 4. **artifact harvest**：收到 agent_result、idle、watchdog、用户状态询问或 resume 时，主控统一检查 required artifacts 和 state compact；完整则推进，缺失则追问一次 / 重启一次 / 阻塞。
 5. **DAG transition**：每个阶段完成后必须按显式 transition 启动下一阶段或进入用户确认门禁，不得停在隐式等待。
-6. **上下文预算**：checkpoint <= 80 行、heartbeat <= 40 行、watchdog 事件 1 行、state compact 默认 <= 200 行；完整事实写 evidence compact / 步骤 md / logs。
+6. **compaction resume handshake**：任意自动压缩、resume、中断恢复或长时间空档后的第一动作，必须读取 checkpoint、artifact manifest、`迁移清单.md` 的 `phase_runtime` 和当前阶段 state compact；恢复出 `current_phase`、`active_agents[]`、`open_confirmations`、`required_artifacts`、`transition_intent` 后才允许继续。禁止凭聊天中“我刚才准备做什么”的记忆继续。
+7. **durability barrier**：主控在以下边界前后必须写入可恢复快照：向用户提问前、用户确认关闭后、agent 启动前后、artifact harvest 后、DAG transition 前后、第 6 步业务写入前后、最终回复前。快照至少包括 checkpoint、manifest phase_runtime、当前阶段 state compact 和 controller event log。若无法写入，必须暂停并记录 `controller_durability_gap`，不得进入业务写入。
+8. **上下文预算**：checkpoint <= 100 行、heartbeat <= 40 行、watchdog 事件 1 行、state compact 默认 <= 200 行；完整事实写 evidence compact / 步骤 md / logs。
 
 ### Agent DAG、主控调度与非阻塞收割（硬规则）
 
@@ -161,6 +166,7 @@ reliable_scheduler:
 - 阶段完成以 required artifacts + compact + manifest 状态为准；`idle_notification` 没有完成/失败语义，只能触发主控检查约定产物。
 - 共享/最终产物单点写入：`迁移清单.md`、`源分析清单.md` 的最终确认状态、`05-目标差异分析.md`、`目标差异摘要.compact.md` 只能由主控或明确指定的单一汇总者写入。
 - 子 agent 只能追加 `pending_confirmations_delta`，不得直接问用户、不得关闭 open confirmation、不得因为需要用户确认而在 agent 内等待。
+- `active_agents[]` 是唯一活动 agent 事实源；05a/05b/05c 并行、修复回派和最终阶段都必须逐项记录。历史 `active_agent` 字段只能兼容读取为数组第一项，不得写回为主状态。
 
 主控非阻塞收割顺序：
 
@@ -196,9 +202,15 @@ phase_runtime:
   active_agents:
     - name: "target-capability-analyzer"
       phase: "05a"
+      agent_id:
+      fanout_group: "05abc"
       required_artifacts:
         - "05a-目标能力分析.md"
         - "目标能力摘要.compact.md"
+      lease_status: active | expired | completed | superseded
+      restart_count: 0
+      watchdog_status: scheduled | running | completed | timeout | unavailable
+      idempotency_key:
       status: pending | running | completed | completed_with_agent_output_missing | agent-output-missing | failed | blocked
       output_mode: compact | artifact-harvested | missing
       last_event: "compact-returned | idle-only | artifact-found | retry-requested | retry-failed"
@@ -210,6 +222,7 @@ phase_runtime:
 要求：
 
 - `active_agents[].required_artifacts` 必须来自 phase packet。
+- 判断并行阶段完成度必须遍历 `active_agents[]` 和 manifest required artifacts；不得以单个 agent 状态代表整个 fan-out。
 - `status` 不得直接从 idle 推断；idle 只能写入 `last_event: idle-only`，随后必须检查产物。
 - `merge_owner` 默认是 `controller`；除非主控明确指定单一汇总者，否则不得由子 agent 写最终合并文件。
 - `user_confirmation_owner` 必须是 `controller`。
@@ -277,7 +290,7 @@ phase_runtime:
 
 1. **先分析，再复制。** 必须先在源项目定位功能入口和依赖闭包，再决定迁什么。
 2. **源代码结构保真优先。** 对本次 feature 私有代码、工具方法、配置字段、model / bll / panel / component 的代码结构与实现，默认应尽最大可能保持与源项目一致，包括字段名、静态属性/方法形态、getter/setter 结构、默认值、判断逻辑和文件内组织方式。不得为了“看起来更符合目标项目风格”而自行改写、包装、私有化、重命名或压缩实现。
-3. **只做必要目标适配。** import 路径、bundle 名、UI 注册路径、资源根路径、目标已有公共框架接入等确实必须适配的部分可以修改，但必须局部、最小化，并在 `06-迁移动作记录.md` 记录差异与原因。
+3. **只做必要目标适配，禁止 AI 自行发挥。** import 路径、bundle 名、UI 注册路径、资源根路径、目标已有公共框架接入等确实必须适配的部分可以修改，但必须局部、最小化，并在 `06-迁移动作记录.md` 记录差异与原因。除这些必要适配外，不得无证据改写源 feature 相关字符串常量、接口地址、枚举值、请求参数、默认值、分支逻辑、静态字段结构和关键方法结构；任何“看起来应该适配目标项目”的改动都必须先有 `user-specified`、`target-existing` 或 `backend-doc` 证据，否则保持源值 / 源结构。
 4. **优先复用目标项目已有能力。** 目标项目已有通用组件、工具类、网络层、UI 管理时，不要重复拷贝同类实现；但复用不得改变源 feature 私有逻辑结构，除非有 `target-existing` / `user-specified` / `backend-doc` 证据。
 5. **资源必须成组校验。** 不能只迁 `.png`，还要检查 `.meta`、Prefab 引用、Atlas、Spine、字体、配置 JSON、本地化文案。
 6. **迁移结果必须可验证。** 至少要能说明入口如何触发、缺了哪些依赖、补了哪些资源、还剩哪些人工确认项。

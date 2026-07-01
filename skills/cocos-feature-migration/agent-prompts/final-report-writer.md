@@ -264,6 +264,7 @@ execution_gap:
    - `static_status_breakdown.asset_deps_business_missing`
    - `static_status_breakdown.prefab_script_binding`
    - `static_status_breakdown.public_uuid_rebind`
+   - `static_status_breakdown.prefab_uuid_closure`
    - `static_status_breakdown.builtin_like_unresolved`
    - `static_status_breakdown.entry_visual_integration`
    - `static_status_breakdown.dynamic_resource_paths`
@@ -272,7 +273,7 @@ execution_gap:
    - `final_status_synthesis.final_status`
    - `final_status_synthesis.status_cap`
    - `final_status_synthesis.downgrade_reasons`
-   `downgrade_reasons` 必须是结构化 taxonomy，每项包含 `code`、`category`、`severity`、`source_dimension`、`evidence_paths`、`user_facing_summary`、`recovery`；category 只能使用 `tooling_degraded | artifact_contract | source_boundary | target_branch_gate | entry_semantics | fidelity_semantics | code_static | resource_static | prefab_script_binding | public_uuid_rebind | builtin_like_unresolved | responsibility_equivalence | agent_coordination`。最终状态不是 `static-pass` 时至少 1 条；若缺失，记录 `execution_gap.final_status_reason_missing`。最终回复只展示 3~5 条 `user_facing_summary`，不展开完整矩阵。
+   `prefab_uuid_closure` 是关键 Prefab 隐藏静态依赖维度；若该维度为 `fail`，最终不得高于 `blocked-static`；若为 `partial`，最终不得高于 `partial-pass-static`。`downgrade_reasons` 必须是结构化 taxonomy，每项包含 `code`、`category`、`severity`、`source_dimension`、`evidence_paths`、`user_facing_summary`、`recovery`；category 只能使用 `tooling_degraded | artifact_contract | source_boundary | target_branch_gate | entry_semantics | fidelity_semantics | code_static | resource_static | prefab_script_binding | public_uuid_rebind | builtin_like_unresolved | responsibility_equivalence | agent_coordination`。最终状态不是 `static-pass` 时至少 1 条；若缺失，记录 `execution_gap.final_status_reason_missing`。最终回复只展示 3~5 条 `user_facing_summary`，不展开完整矩阵。
    不得只写一个笼统的 `partial-pass-static`。
 8. 若 `migration-static-check.json` 或 `最终状态摘要.compact.md` 中存在 `editor_prefab_binding_review_recommendation` / `prefab_binding_review` / `resource-governance-review` / `entry_visual_integration` 风险，必须在“后续人工复核建议”中用独立小节输出，且说明 `must_not_run_automatically: true`。入口 icon / 视觉资源占位、公共 UUID 改绑未全量审计、builtin-like / unknown unresolved 只能作为人工复核项，不能被写成“已完整可用”。
 9. 监控默认使用 `standard` 等级；用户要求性能复盘、存在明显慢操作、流程阻塞、回派修复超过 1 次、大型迁移任务或 compact/timing 冲突时升级为 `detailed`。若出现 `agent_output_missing`、`restart_once`、任一 agent wall time > 10 分钟、最终状态不是 `static-pass`、第 6/7 步降级或回派、`step_granularity_insufficient`，必须自动升级为 detailed 或至少追加 detailed appendix。
@@ -342,6 +343,7 @@ execution_gap:
   - asset_deps_business_missing:
   - prefab_script_binding:
   - public_uuid_rebind:
+  - prefab_uuid_closure:
   - builtin_like_unresolved:
   - entry_visual_integration:
   - dynamic_resource_paths:
@@ -354,7 +356,7 @@ execution_gap:
     - code:
       category:
       severity:
-      source_dimension:
+      source_dimension: code_import_symbol | ui_config_event_protocol | asset_deps_business_missing | prefab_script_binding | public_uuid_rebind | prefab_uuid_closure | builtin_like_unresolved | entry_visual_integration | dynamic_resource_paths | responsibility_equivalence | fidelity | workflow
       evidence_paths:
       user_facing_summary:
       recovery:
@@ -366,6 +368,11 @@ execution_gap:
   - present: yes / no
   - transitional_dirs:
   - unresolved_public_uuid_rebind:
+- prefab_uuid_closure:
+  - status:
+  - missing_count:
+  - public_unrebound_count:
+  - unknown_count:
 - entry_visual_integration:
   - status:
   - placeholder_or_empty_icon:

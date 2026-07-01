@@ -130,6 +130,18 @@ blocks_next_phase: true | false
 
 `critical_unknown_count > 0` 且未恢复时，默认阻塞 05c 资源计划或至少阻塞第 6 步业务写入。
 
+## P0：资源边界与同名消歧
+
+最终资源清单中，凡是可能进入 copy/rebind 的资源，必须输出 `canonical_source_path`、`source_uuid`、`referenced_by`、`entry_chain`、`boundary_status`、`included_boundary_evidence` 和 `excluded_boundary_check`。`boundary_status` 只能使用：
+
+```text
+must_copy | rebind_required | reusable_hint | dynamic_runtime | excluded_by_boundary | not_required
+```
+
+如果源项目存在相同 basename 的多个资源，必须输出 `same_basename_disambiguation`，列出每个候选的路径、uuid、引用方和边界状态。不得把同名候选合并成一个资源，也不得因为 basename 相同把 excluded boundary 的资源标为 `must_copy`。
+
+只有 confirmed core boundary 的 Prefab UUID 闭包、included code closure 的动态加载字符串、UIConfig/route 或明确入口链路引用的资源，才能标记 `must_copy` / `rebind_required`。只被 excluded module / excluded boundary / 相邻功能引用的资源必须标记 `excluded_by_boundary`，并从 copy plan 候选中排除。
+
 
 - `source_project`
 - `target_project`（仅用于目标迁移目录路径、目标侧复用提示记录和跨项目上下文；目标分支未确认前不得读取目标业务文件，不得修改目标项目）
@@ -231,9 +243,10 @@ blocks_next_phase: true | false
 4. 使用第 1 步 precheck 记录的 `cli-anything-cocoscreator` capability；若 precheck 已确认可用，直接执行资源命令，不重复做可用性探测。若命令实际执行失败，再返回 tool unavailable 风险。
 5. 用 `cli-anything-cocoscreator asset deps` 展开关键 prefab / asset 静态 outgoing 依赖。
 6. 用 `asset uuid + asset refs` 反查关键 TS / prefab / 资源引用，尤其是脚本绑定 prefab。
-7. 合并 AI 动态依赖与 CLI 静态依赖，去重并分类为：必迁 / 复用候选 / 动态 / 风险 / 不迁移。
-8. 输出资源类型覆盖：Prefab、Sprite、Atlas、Spine、Font、Audio、Json、language/i18n、粒子、材质、Shader 等按需检查。
-9. 在 `源侧摘要.compact.md` 中压缩记录关键 prefab、动态资源、script uuid refs、asset deps 摘要。
+7. 对 critical prefab scope 内每个 Prefab 文本提取全部 `__uuid__`，剥离 `@subid` 为 `base_uuid` 后用源侧 `.meta` reverse index 反查，输出 `critical_prefab_uuid_refs`；不得把 `@property(Prefab)` 独立子 Prefab、字体、材质、SpriteFrame、默认头像、coin 图标漏出资源清单。
+8. 合并 AI 动态依赖、CLI 静态依赖和 `critical_prefab_uuid_refs`，去重并分类为：必迁 / 复用候选 / 动态 / 风险 / 不迁移。
+9. 输出资源类型覆盖：Prefab、Sprite、Atlas、Spine、Font、Audio、Json、language/i18n、粒子、材质、Shader 等按需检查。
+10. 在 `源侧摘要.compact.md` 中压缩记录关键 prefab、动态资源、script uuid refs、asset deps 摘要和 `critical_prefab_uuid_refs` 统计。
 
 ## 耗时记录
 
@@ -262,6 +275,28 @@ blocks_next_phase: true | false
     missing_count:
     unresolved_count:
     log_path:
+- critical_prefab_uuid_refs:
+  - prefab_path:
+    total_uuid_count:
+    unique_base_uuid_count:
+    resolved_count:
+    unresolved_count:
+    required_asset_count:
+    evidence_path:
+- resource_boundary_evidence:
+  - canonical_source_path:
+    source_uuid:
+    basename:
+    referenced_by:
+    entry_chain:
+    boundary_status:
+    included_boundary_evidence:
+    excluded_boundary_check:
+- same_basename_disambiguation:
+  - basename:
+    candidates:
+    selected:
+    excluded:
 - resource_count:
 - dynamic_asset_count:
 - unresolved_static_count:

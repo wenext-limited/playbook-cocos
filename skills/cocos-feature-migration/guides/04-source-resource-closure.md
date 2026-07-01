@@ -20,6 +20,31 @@
 - language / i18n 文案
 - 粒子、材质、Shader（如有）
 
+#### 4.0.z 资源边界与同名消歧（P0 硬门禁）
+
+最终资源闭包不得只按文件名、basename、目录 glob 或模糊路径输出资源清单。每个可能进入后续复制计划的资源必须带结构化边界证据：
+
+```yaml
+resource_boundary_evidence:
+  - canonical_source_path:
+    source_uuid:
+    asset_type:
+    basename:
+    referenced_by: []          # prefab uuid refs / dynamic load / UIConfig / code closure
+    entry_chain: []            # confirmed entry -> panel/component -> asset
+    boundary_status: must_copy | rebind_required | reusable_hint | dynamic_runtime | excluded_by_boundary | not_required
+    included_boundary_evidence: []
+    excluded_boundary_check:
+      checked: true
+      excluded_modules_hit: []
+      excluded_resource_paths_hit: []
+      excluded_referenced_by: []
+```
+
+同名资源在源项目存在多个候选时，必须输出 `same_basename_disambiguation`，并逐项说明 uuid、完整路径、引用方和边界状态。只有被 confirmed core boundary 的 Prefab UUID 闭包、included code closure 中的动态加载字符串、UIConfig/route 或明确入口链路引用的资源，才能标记 `must_copy` / `rebind_required`。只被 `excluded_modules`、excluded boundary 或相邻功能引用的资源必须标记 `excluded_by_boundary`，不得进入第 5 步 copy plan。
+
+典型陷阱：`prefab/item/itemRank.prefab` 与 `prefab/panel/itemRank.prefab` 这类同名资源必须按 uuid 和引用链消歧；只迁移被 confirmed 主榜单 Prefab 引用的列表项，不得因 basename 相同复制 excluded 排名面板资源。
+
 #### 4.0.x 资源预取 / 最终闭包拆分（速度优化硬规则）
 
 第 4 步可以拆成 `04a source-resource-prefetch` 与 `04b source-resource-closure`，目标是让资源索引预热与第 3 步代码闭包并行，减少总等待时间，同时不让 Main 读取大输出。
@@ -190,10 +215,44 @@ resource_closure_gate:
 8. 将 AI 推断出的**动态依赖**与 CLI 找到的**静态依赖**合并去重，形成最终资源清单
 9. 如用户提供并允许，可借助 `cli-anything-cocoscreator`（参考：`https://github.com/OscargwStudio/cli-anything-cocoscreator/blob/main/README.md`）做批量核对
 
+##### 关键 Prefab `__uuid__` 全量反查（P0 必做）
+
+源资源闭包不得只依赖文件名、UIConfig、脚本 uuid refs 或 `asset deps` 摘要。04b 必须对 `critical_prefab_scope` 中每个 Prefab 文本执行 `__uuid__` 全量提取，并形成可传给第 5/6/7 步的结构化清单。
+
+处理规则：
+
+1. 提取 Prefab 文本中所有 `__uuid__` 值；若形如 `<uuid>@<subid>`，必须同时记录 `raw_uuid` 与剥离后的 `base_uuid`。
+2. 用源侧 `.meta` uuid reverse index 反查 `base_uuid` 对应资产路径；SpriteFrame 等子资源必须归属到 base asset / `.meta`，不得因为带 `@subid` 就标为 unresolved。
+3. 对无法通过源侧 `.meta` 反查的 uuid，继续分类为 `builtin-like | editor-only | unknown`，并保留证据路径。
+4. `critical_prefab_uuid_refs` 必须覆盖独立子 Prefab、字体、材质、SpriteFrame/Texture、Atlas、默认头像、coin 图标、脚本组件和其他 Cocos 资源引用。
+5. 对能确定属于源功能静态依赖但未出现在资源清单中的 uuid，必须补入 `required_assets` 或 `reusable_asset_hints`；不能只写风险。
+
+04b 输出必须包含：
+
+```yaml
+critical_prefab_uuid_refs:
+  - prefab_path:
+    total_uuid_count:
+    unique_base_uuid_count:
+    resolved_count:
+    unresolved_count:
+    refs:
+      - raw_uuid:
+        base_uuid:
+        source_asset_path:
+        asset_type: prefab | script | font | material | spriteframe | texture | atlas | audio | json | builtin-like | unknown
+        required_for_migration: true | false
+        handling_hint: copy-with-meta | reuse-target-equivalent | rebind-target-equivalent | builtin-like-review | investigate
+        evidence:
+```
+
+`resource_closure_gate.critical_unknown_count` 必须计入关键 Prefab `__uuid__` 未解析项；若未解析项影响核心入口、主面板、列表项或业务资源，必须设置 `blocks_step6_migration: true`，除非 04b 已给出可执行的 copy/reuse/rebind 计划。
+
 **不要只依赖 UIConfig。** UIConfig 只能帮助定位入口 prefab，不能覆盖：
 
 - 运行时字符串拼接路径
 - prefab 内部静态挂载的字体 / 材质 / 子 prefab / SpriteFrame
+- prefab 组件字段里的 `@property(Prefab)` 独立子 Prefab，例如时间列表 item、规则 item、奖励 item
 - TS 脚本被 prefab 反向引用后带出的资源
 - 按 appName / 区域 / 语言切换的资源分支
 

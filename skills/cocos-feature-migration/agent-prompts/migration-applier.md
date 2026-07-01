@@ -143,6 +143,18 @@ reverse_index_refresh:
 
 脚本绑定证据优先级：`prefab-script-binding-index direct` -> `uuid-reverse-index + prefab full/short/compressed uuid hit` -> `serialized script field hit` -> targeted `cli-anything-cocoscreator asset uuid + asset refs` -> unknown/missing。reverse index missing 本身不是业务风险；关键 expected script 仍无法证明绑定时，才按 prefab binding gate partial/block。
 
+## P0：关键 Prefab `__uuid__` 目标侧闭合预检
+
+在写 `prefab-static-check-cache.json` 前，必须对 confirmed core boundary 内的入口 Prefab、主面板 Prefab、列表项 Prefab 和资源计划标记的关键 Prefab 执行 `__uuid__` 全量闭合检查：
+
+1. 从目标 Prefab 文本提取全部 `__uuid__`，对 `<uuid>@<subid>` 同时记录 `raw_uuid` 和 `base_uuid`。
+2. 用目标 `uuid-reverse-index.json` 或 `.meta` 扫描反查 `base_uuid`；命中目标 `.meta` 后记录 `target_asset_path` / `target_meta_path`。
+3. 未命中项必须与源侧 `critical_prefab_uuid_refs`、05c 资源计划、builtin-like allowlist 对照并分类为 `missing-business-resource | public-resource-unrebound | builtin-like | editor-only | unknown`。
+4. 对 `missing-business-resource`，先在第 6 步补迁源资源和 `.meta` 或改绑到目标同职责资源，再重扫；不得把确定缺失的独立子 Prefab / 字体 / 材质 / SpriteFrame / 默认头像 / coin 图标留给第 7 步首次发现。
+5. 对 `public-resource-unrebound`，若目标已有同职责资源且可确定改绑，优先改绑；无法安全改绑时写 review recommendation，最终最高 `partial-pass-static`。
+
+结果必须写入 `prefab-static-check-cache.json.prefab_uuid_closure`、`migration-progress.json`、`迁移状态摘要.compact.md`、phase-summary JSON 和 `agent_result.key_outputs`。若关键 Prefab 的非 builtin-like `missing_count > 0`，必须返回 `execution_status: blocked | partial` 并设置 `phase_gate.blocks.final_static_status: true`。
+
 
 在修改任何目标业务代码或资源前，必须先读取 `目标差异摘要.compact.md`，检查：
 
@@ -162,6 +174,14 @@ blocks_next_phase: true
 needs_user_confirmation: true | false
 next_action: controller_merge_or_user_confirmation_required
 ```
+
+## P0：copy manifest preflight 与无关资源审计
+
+实际复制资源前，必须检查 `migration-dry-run.json.copy_files` 中每个 `decision: copy` 项。每项必须包含 `source_uuid`、`canonical_source_path`、`included_by`、`boundary_status: must_copy | rebind_required`、`excluded_boundary_check.checked=true`。缺字段、同 basename 多候选未按 uuid/path 消歧、或命中 excluded module / excluded boundary / excluded resource path 时，不得复制该资源。
+
+禁止按 basename、目录 glob 或“copy all same name”生成实际复制列表；只能复制 05c 资源计划中已通过边界准入的精确 path+uuid 项。
+
+复制后必须执行 `extraneous_copied_resource_audit`：遍历本轮新增资源，确认它被核心 Prefab UUID 闭包、included dynamic load、UIConfig/route 或迁入代码 import/reference 引用。无法证明引用且存在 excluded chain 或同名误带证据时，标记 `extraneous_copied_resource`，不得推荐 `static-pass`；若资源是本 agent 本轮新增且可安全删除，应清理并记录，否则写人工清理建议。
 
 
 - `source_project`
@@ -197,6 +217,7 @@ next_action: controller_merge_or_user_confirmation_required
 - 禁止执行或探测 TypeScript / lint / Cocos build / npm build 等验证命令；默认验证只做到 L1 静态结构，且由第 7 步执行。
 - 禁止运行 `tsc` / `npx tsc` / `node_modules/.bin/tsc` / `cocos` / `npm run build` / `npm run typecheck`，除非主控明确转达用户要求。
 - 禁止多个迁移 agent 并行修改同一批业务文件；本 agent 应是唯一代码/资源写入者。
+- 禁止 AI 自行发挥改写业务语义。迁移落地默认照源保真；除 import 路径、bundle 名、UI 注册路径、资源根路径、目标已有公共能力接入等必要适配外，不得无证据改写源 feature 相关字符串常量、接口地址、枚举值、请求参数、默认值、分支逻辑、静态字段结构和关键方法结构。任何“看起来应该适配目标项目”的改动，必须先有 `user-specified`、`target-existing` 或 `backend-doc` 证据；没有证据时保持源值 / 源结构，并返回待确认项。
 - 禁止对第 5 步标记为 `inferred`、`高风险可疑`、`needs_user_confirmation` 的业务语义改写静默落地。包括 API path、activity/task 字段、native/KV/config/gating、old/new interface 分支、请求参数动态值、事件闭环。必须保留源语义或等待主控转达用户确认。
 - 禁止对源 feature 私有代码结构做无证据改写/包装。包括但不限于：把源侧 `static xxx` 字段改成 `private _xxx`、把 getter 改成固定静态字符串、改变数组元素类型、简化判断逻辑、重命名源侧方法/字段、压缩源侧多分支实现。除 import 路径、bundle 路径、UI 注册路径、目标业务常量等必要适配外，应尽最大可能保持源项目代码结构和实现形态一致。
 - 对 `AppUtil`、`SubGameConfig`、`SubGame` 等跨项目差异文件中的 feature 相关片段，默认复制/保留源片段结构，只修改有明确证据的目标业务值；如果为了目标项目风格需要包装或私有化，必须先在 `06-迁移动作记录.md` 写明差异并要求主控/用户确认。
@@ -385,6 +406,16 @@ unknown_only_after_repair_attempt:
 - added_files:
 - modified_files:
 - copied_resources:
+- copy_manifest_preflight:
+  - checked_count:
+  - blocked_or_skipped_count:
+  - same_basename_disambiguation_count:
+  - excluded_boundary_hit_count:
+- extraneous_copied_resource_audit:
+  - status: pass / partial / fail
+  - checked_count:
+  - extraneous_count:
+  - extraneous_resources:
 - reused_resources:
 - transitional_dirs:
   - path:
@@ -412,6 +443,15 @@ unknown_only_after_repair_attempt:
   - direct_or_secondary_count:
   - unknown_or_missing_count:
   - repair_recommendations_count:
+- prefab_uuid_closure:
+  - status: pass / partial / fail / unavailable
+  - checked_prefab_count:
+  - total_uuid_count:
+  - unique_base_uuid_count:
+  - missing_count:
+  - public_unrebound_count:
+  - builtin_like_count:
+  - unknown_count:
 - needs_user_confirmation:
 - confirmation_topic:
 - entrance_resource_check:

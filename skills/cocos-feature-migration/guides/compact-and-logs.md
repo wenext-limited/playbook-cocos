@@ -140,6 +140,35 @@ content_level: minimal_harvestable | full
 5. 对高成本阶段，必须在每个关键 step 后写 `progress_commit`：刷新 heartbeat，并尽量刷新 phase-summary JSON 中的 `current_step`、`partial_outputs`、`missing_required_artifacts`。
 6. Main/controller 在第二个 checkpoint 或 soft timeout 前发现 required artifacts 仍缺失时，应优先发送一次 `enter_artifact_finalization_mode` 提醒，而不是等到最终 soft timeout 才追问。
 
+### Controller Durability Barrier（P0）
+
+为降低主对话自动压缩影响，controller 自己也必须执行轻量落盘屏障。屏障只写调度状态，不写完整证据：
+
+```yaml
+controller_durability_barrier:
+  write_order:
+    - current_state_compact_or_bootstrap
+    - logs/artifact-contract-manifest.json phase_runtime
+    - controller-checkpoint.compact.md resume_cursor
+    - logs/controller-event-log.jsonl one_line_event
+  required_before:
+    - ask_user
+    - spawn_agent
+    - dag_transition
+    - business_write
+    - final_response
+  required_after:
+    - user_confirmation_closed
+    - agent_spawned
+    - artifact_harvested
+    - business_write
+    - phase_completed
+  if_write_fails:
+    action: pause_and_record_controller_durability_gap
+```
+
+`resume_cursor.idempotency_key` 应由 `feature_slug + phase + transition_intent + target_branch_or_commit` 组成。同一个 `idempotency_key` 已标记 `committed` 时，恢复后不得重复执行同一业务写入、重复启动同一 fan-out，或重复关闭同一用户确认项。
+
 ### Controller Helper Completion（P0 硬规则）
 
 当 agent 已完成主要分析/迁移动作，但缺少文档类产物时，controller 可以启动小上下文 helper 或由 Main 手动补齐 canonical 产物，避免无限等待原 agent。
@@ -533,6 +562,7 @@ phase_runtime:
   phase: <phase>
   agent_name: <agent>
   agent_id: pending_until_spawned | <agent-id>
+  active_agents_ref: controller-checkpoint.compact.md#active_agents
   lease_status: active
   restart_count: 0
   superseded_agents: []
@@ -585,6 +615,18 @@ heartbeat 默认不超过 40 行，只能包含：
 
 主控启动 agent 后必须安排 bounded watchdog。优先使用 `Monitor`；如果不可用或权限不允许，使用 `Bash(run_in_background=true)` one-shot fallback，等待 artifacts 完整或 soft timeout 后退出。
 
+若 `Monitor` 与 Bash fallback 都不可用、后台任务启动失败、`task_id` 丢失/不可查询，或恢复时 `next_checkpoint_at/soft_timeout_at` 已过期，主控必须写入：
+
+```yaml
+watchdog:
+  status: unavailable
+  unavailable_reason: monitor_unavailable | bash_fallback_unavailable | task_id_missing | task_unqueryable | checkpoint_overdue
+resume_cursor:
+  safe_resume_action: harvest
+```
+
+此时不得把 `safe_resume_action` 写成 `wait_watchdog`。恢复、用户询问状态或 checkpoint 到期时，主控必须立即执行 artifact harvest，再按产物完整性决定推进、追问、重启或阻塞。
+
 watchdog 只允许输出单行事件：
 
 ```text
@@ -604,6 +646,7 @@ watchdog 不得输出完整文件内容、完整日志或完整 compact。主控
 |---|---|---|---|
 | required artifacts + state compact 完整，且 agent_result 正常 | 读取 state compact，合并状态 | `agent_harvest` | 是 |
 | required artifacts + state compact 完整，但无 agent_result / 只有 idle | 读取 state compact | `completed_with_agent_output_missing` | 是 |
+| watchdog unavailable / task_id 不可查 / checkpoint 过期 | 不等待 watchdog，立即检查 manifest + required artifacts + state compact | `watchdog_unavailable_active_harvest` | 视产物 |
 | required artifacts 缺失，未追问过 | 追问 agent 一次 | `harvest_missing_prompt_once` | 否 |
 | 追问后仍缺失，未重启过 | 标记旧 agent superseded，重启一次 | `agent_output_missing_restart` | 否 |
 | 重启后仍缺失 | 写 manifest 风险并阻塞 | `agent_output_missing_blocked` | 否 |
@@ -623,11 +666,11 @@ controller_transition_gap_check:
     - current_phase_artifacts_complete: true
     - open_blocking_confirmations: 0
     - next_transition_launchable: true
-    - checkpoint.active_agents empty or missing expected next agents
+    - checkpoint.active_agents[] empty or missing expected next agents
     - no hard_stop recorded
   mandatory_repair:
     - append controller-event-log event=controller_transition_gap
-    - update controller-checkpoint current_phase/active_agents/required_artifacts
+	- update controller-checkpoint current_phase/active_agents/required_artifacts
     - refresh artifact-contract-manifest for next phase
     - write bootstrap state compact for next phase agent(s)
     - launch next phase agent(s)
@@ -639,6 +682,8 @@ controller_transition_gap_check:
 ```
 
 特殊链路 `04 -> 05x -> 05a/05b/05c`：`05x-target-shared-search.compact.json` 是 fan-out 输入，不是可暂停的阶段终点。生成 05x 后必须立即启动 05a/05b/05c；若启动失败，必须写明失败的具体 agent 和原因。
+
+`active_agents[]` 是 checkpoint / manifest / phase_runtime 的唯一活动 agent 事实源。并行阶段必须逐个 agent 写入 `name`、`agent_id`、`phase`、`fanout_group`、`required_artifacts`、`restart_count`、`lease_status`、`watchdog_status`、`idempotency_key` 和 `status`；历史 `active_agent` 字段只能兼容读取，不得作为是否 fan-out 完整的判断依据。
 
 
 #### Timing coverage 校验
