@@ -53,6 +53,18 @@ git clone https://github.com/wenext-limited/playbook-cocos.git .playbook-cocos
 test -f ~/.playbook-cocos/README.md && echo "playbook-cocos installed"
 ```
 
+### 4. 询问是否配置 AI 工具入口
+
+首次安装验证通过后，AI 必须询问用户是否继续按照 `~/.playbook-cocos/skills/cocos-playbook-adapter/SKILL.md` 为业务项目配置 AI 工具入口：
+
+```text
+playbook-cocos 已完成首次安装。是否继续按 cocos-playbook-adapter 为业务项目配置 AI 工具入口？
+A. 是：继续读取并执行 ~/.playbook-cocos/skills/cocos-playbook-adapter/SKILL.md
+B. 否：结束安装流程，后续需要接入 AI 工具时再配置
+```
+
+只有用户明确选择 A 后，才读取并执行 `cocos-playbook-adapter` 技能；如果用户选择 B 或未明确选择，不要自动创建或修改业务项目中的 `AGENTS.md`、`CLAUDE.md`、`.cursorrules`、`.windsurfrules`、`.clinerules`、符号链接或 Windows junction。
+
 ---
 
 ## Windows 安装
@@ -94,6 +106,18 @@ Test-Path "$env:USERPROFILE\.playbook-cocos\README.md"
 ```
 
 返回 `True` 表示安装成功。
+
+### 4. 询问是否配置 AI 工具入口
+
+首次安装验证通过后，AI 必须询问用户是否继续按照 `%USERPROFILE%\.playbook-cocos\skills\cocos-playbook-adapter\SKILL.md` 为业务项目配置 AI 工具入口：
+
+```text
+playbook-cocos 已完成首次安装。是否继续按 cocos-playbook-adapter 为业务项目配置 AI 工具入口？
+A. 是：继续读取并执行 %USERPROFILE%\.playbook-cocos\skills\cocos-playbook-adapter\SKILL.md
+B. 否：结束安装流程，后续需要接入 AI 工具时再配置
+```
+
+只有用户明确选择 A 后，才读取并执行 `cocos-playbook-adapter` 技能；如果用户选择 B 或未明确选择，不要自动创建或修改业务项目中的 `AGENTS.md`、`CLAUDE.md`、`.cursorrules`、`.windsurfrules`、`.clinerules`、符号链接或 Windows junction。
 
 ---
 
@@ -163,4 +187,5 @@ Windows 路径对应为：
 - 已存在目录时只允许安全检查，**不要自动 pull、fetch、删除、覆盖或强制重置**。
 - 如果检测到 `~/.playbook-cocos` 已存在且包含 `.git`，必须暂停同步并向用户说明原因，等待用户指示。
 - 本文档只负责**首次安装**，不负责后续的同步/更新；目标目录已存在时一律暂停，不自动 pull。
+- 首次安装验证通过后，必须询问用户是否继续按 `skills/cocos-playbook-adapter/SKILL.md` 为业务项目配置 AI 工具入口；只有用户明确同意后才可进入该技能流程。
 - 安装完成后，向用户返回实际安装路径和验证结果。
