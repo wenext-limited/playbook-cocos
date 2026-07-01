@@ -41,6 +41,9 @@
 - `cocos-data-persistence/`
   实现数据持久化时使用。包括三层存储架构、前缀隔离、内存缓存策略。
 
+- `cocos-playbook-pr-submit/`
+  将本地 `playbook-cocos` 仓库变更安全提交到 GitHub PR 时使用。包括环境检查、stage 本地修改、拉取远程更新、创建 `feat/xxx` 分支、恢复改动、推送分支并创建合并到 `origin/main` 的 PR。
+
 ### `oops-`
 
 以 `oops-` 为前缀的技能聚焦 OOPS Plugin Framework 的用法。
