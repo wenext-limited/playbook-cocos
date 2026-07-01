@@ -139,6 +139,20 @@ Windows 路径对应为：
 %USERPROFILE%\.playbook-cocos
 ```
 
+## 接入不同 AI 工具
+
+安装完成后，不建议把整份 `playbook-cocos` 复制到业务项目中。推荐在业务项目根目录为不同 AI 工具创建轻量入口文件，让入口文件引用用户级安装目录。
+
+常见入口文件：
+
+- Claude CLI / Claude Code：`CLAUDE.md`
+- Codex / Codex CLI：`AGENTS.md`
+- Cursor：`.cursorrules` 或 `.cursor/rules/*.mdc`
+- Windsurf：`.windsurfrules`
+- Cline / Roo Code：`.clinerules`、`.roo/rules/*.md` 或 custom instructions
+
+如需自动生成或更新这些入口文件，请使用 `skills/cocos-playbook-adapter/SKILL.md`。该技能会先让用户选择目标 AI 工具、目标项目目录和适配方式，并支持 macOS / Windows 的轻量入口文件、符号链接或 Windows junction。
+
 ---
 
 ## AI 执行原则
