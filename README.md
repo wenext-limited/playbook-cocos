@@ -15,6 +15,7 @@
 ```
 playbook-cocos/
 ├── AGENTS.md                              # 仓库结构说明、编辑规则、技能命名规范
+├── AI本机安装.md                          # 给 AI 投喂的本机安装说明
 ├── CLAUDE.md                              # Claude 引导文件
 ├── README.md                              # 本文件
 ├── rules/
@@ -50,7 +51,6 @@ playbook-cocos/
 │   └── cocos-developer.md                 # Cocos 开发代理角色定义
 ├── docs/
 │   ├── 架构总览.md                         # 项目架构全景（含 MVVM/动画链/频率分布）
-│   ├── AI本机安装说明.md                   # 给 AI 投喂的本机安装说明
 │   └── 使用说明.md                         # 项目使用说明书
 └── skills/cocos-project-setup/new_project_code/ # 新项目基础代码模板
     ├── README.md                          # 模板快速开始
@@ -110,7 +110,7 @@ playbook-cocos/
 
 详细的使用方法请参阅 [使用说明书](docs/使用说明.md)，涵盖快速开始、创建新项目、AI 代理配置和知识库扩展等内容。
 
-如需将本知识库安装到本机用户级目录并投喂给 AI，请参阅 [本机安装说明（给 AI 投喂）](docs/AI本机安装说明.md)。
+如需将本知识库安装到本机用户级目录并投喂给 AI，请参阅 [本机安装说明（给 AI 投喂）](AI本机安装.md)。
 
 ## 贡献指南
 
