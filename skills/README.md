@@ -41,8 +41,8 @@
 - `cocos-data-persistence/`
   实现数据持久化时使用。包括三层存储架构、前缀隔离、内存缓存策略。
 
-- `cocos-playbook-pr-submit/`
-  将本地 `playbook-cocos` 仓库变更安全提交到 GitHub PR 时使用。包括环境检查、stage 本地修改、拉取远程更新、创建 `feat/xxx` 分支、恢复改动、推送分支并创建合并到 `origin/main` 的 PR。
+- `cocos-playbook-sync/`
+  同步本地 `playbook-cocos` 仓库与 GitHub 远程时使用。无本地修改时只做快进更新；有本地修改时列出变更，让用户选择丢弃后更新，或进入 PR 提交流程上传改动。
 
 ### `oops-`
 
