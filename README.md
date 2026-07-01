@@ -41,7 +41,7 @@ playbook-cocos/
 │   ├── cocos-localization/SKILL.md        # 多语言本地化
 │   ├── cocos-coin-animation/SKILL.md      # 贝塞尔曲线飞币动画
 │   ├── cocos-data-persistence/SKILL.md    # 数据持久化与缓存策略
-│   ├── cocos-playbook-pr-submit/SKILL.md  # 提交 playbook-cocos 变更到 PR
+│   ├── cocos-playbook-sync/SKILL.md       # 同步/上传 playbook-cocos 变更
 │   ├── oops-framework/SKILL.md            # OOPS 框架核心（12 子模块）
 │   ├── oops-ecs-pattern/SKILL.md          # ECS 三层架构
 │   ├── oops-event-system/SKILL.md         # 事件系统与消息分发
@@ -78,7 +78,7 @@ playbook-cocos/
 | `cocos-localization` | 多语言本地化工作流 |
 | `cocos-coin-animation` | 贝塞尔曲线飞币动画、多方向路径、对象池 |
 | `cocos-data-persistence` | 三层存储架构、前缀隔离、内存缓存 |
-| `cocos-playbook-pr-submit` | 将本地 `playbook-cocos` 变更提交到 `feat/xxx` 分支并创建合并到 `origin/main` 的 PR |
+| `cocos-playbook-sync` | 同步本地 `playbook-cocos`；无修改时仅更新，有修改时让用户选择丢弃或提交 PR |
 
 ### OOPS 框架技能（`oops-` 前缀）
 
