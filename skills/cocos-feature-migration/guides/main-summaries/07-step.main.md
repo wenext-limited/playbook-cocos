@@ -57,6 +57,7 @@ step7_status_gate:
     asset_deps_business_missing:
     prefab_script_binding:
     public_uuid_rebind:
+    prefab_uuid_closure:
     builtin_like_unresolved:
     entry_visual_integration:
     dynamic_resource_paths:
@@ -71,7 +72,7 @@ step7_status_gate:
       - code:
         category: tooling_degraded | artifact_contract | source_boundary | target_branch_gate | entry_semantics | fidelity_semantics | code_static | resource_static | prefab_script_binding | public_uuid_rebind | builtin_like_unresolved | responsibility_equivalence | agent_coordination
         severity: note | partial | blocking
-        source_dimension:
+        source_dimension: code_import_symbol | ui_config_event_protocol | asset_deps_business_missing | prefab_script_binding | public_uuid_rebind | prefab_uuid_closure | builtin_like_unresolved | entry_visual_integration | dynamic_resource_paths | responsibility_equivalence | fidelity | workflow
         evidence_paths: []
         user_facing_summary:
         recovery:
@@ -93,6 +94,7 @@ step7_status_gate:
 
 - 默认只执行 L1 静态验证。
 - cache / CLI / ts-graph 不足时进入 verification degraded mode，使用 rg/Read、Prefab 文本 uuid、`.meta` reverse index、`prefab-static-check-cache.json` 降级复验；能证明主链静态闭合但缺 editor/public uuid 完整证据时收敛为 `partial-pass-static`，不得无限等待工具或编辑器。
+- 关键 Prefab `__uuid__` 闭合是 L1 硬维度：入口/主面板/列表项 Prefab 的所有 `__uuid__` 必须剥离 `@subid` 后在目标 `.meta` 索引中解析；missing-business-resource 触发 `blocked-static`，public-resource-unrebound/unknown 至少触发 `partial-pass-static`，仅 builtin-like/editor-only 可作为 review note。
 - 不主动探测 / 运行 tsc、cocos、npm build、npm typecheck。
 - Prefab 绑定编辑器复核只作为人工复核建议，不作为 skill 阶段自动执行。
 - 第 7 步完成后默认静态迁移交付流程即结束，不因编译、编辑器和运行态人工复核未执行而悬挂。

@@ -32,19 +32,41 @@ allowed-tools: [Read, Write, Edit, Bash, Agent, SendMessage, Monitor, TaskCreate
 - 开始迁移分析前必须探测 ts-graph MCP；涉及 TS/JS 代码分析时优先使用 ts-graph。若 ts-graph 不可用，不默认完全卡住流程：进入 `execution_mode: degraded`，用 `rg`/Read/import 文本扫描降级完成代码闭包，并把代码依赖置信度和最终状态上限写入 manifest / compact / 使用效果监控。
 - 开始迁移分析前必须按当前平台检查 `cli-anything-cocoscreator`；涉及 Cocos 资源、Prefab、UUID、`.meta` 时优先使用该工具或其缓存索引。若 CLI 不可用，不默认完全卡住流程：进入 `execution_mode: degraded`，用 Prefab / `.meta` 文本扫描、uuid reverse index、缓存索引降级分析；关键 Prefab / 资源无法静态证明时最终最高 `partial-pass-static` 或 `blocked-static`。
 - `cli-anything-cocoscreator` 的具体命令、参数和示例不得在本 skill 内重复维护；必须按需直接引用 GitHub Markdown：[`README.md`](https://github.com/OscargwStudio/cli-anything-cocoscreator/blob/main/README.md)、[`COCOSCREATOR.md`](https://github.com/OscargwStudio/cli-anything-cocoscreator/blob/main/COCOSCREATOR.md)。不得引用本地 clone 路径作为说明来源。
-- 目标 feature 分支确认是目标侧门禁：启动目标侧 agent、目标项目 stash/pull/checkout/创建分支/业务修改前必须完成。确认菜单必须使用纯文本策略菜单，不得压缩成二选一；至少保留“继续当前本地分支”“从当前本地分支创建默认迁移分支”“从 origin/main 创建（选择后校验或已校验）”“base=origin/xxx”“branch=feature/xxx”“暂停”，并在条目中写明创建基线和适用场景。默认推荐顺序：用户显式指定分支优先；否则优先推荐“从 origin/main 创建”以获得干净迁移基线；若远程不可用或校验失败，推荐“从当前本地分支创建”；只有用户明确希望叠在当前分支上时才推荐“继续当前本地分支”。未提前远程探测时，远程基线/远程迁移分支可作为“选择后校验”策略展示；用户选择后再做只读远程校验，失败则阻塞说明原因。
+- 所有需要用户选择的确认菜单必须使用大写字母选项（`A/B/C/...`），不得使用 `1/2/3/...` 作为可回复选项；提示语写“直接回复字母或文本即可”。数字只允许用于过程步骤、检查项、问题分组编号或文档内部有序说明，不得作为目标分支策略、迁移范围/功能边界、源分析缓存处理、保真风险确认等菜单内的可回复选项。
+- 当同一轮需要向用户展示多个确认菜单时，必须使用数字只做问题分组标题，例如 `1、目标分支策略`、`2、功能边界`；每个问题分组内的菜单选项都必须从 `A` 重新开始，不得跨分组延续为 `D/E/F/...`。提示语必须明确可回复格式，例如“直接回复 `1C，2A`，或回复 `分支 C，边界 A`；也可直接回复完整策略文本”。示例：
+  ```text
+  1、目标分支策略
+  A. 继续当前本地分支：适合确认当前分支就是承接分支。
+  B. 从当前本地分支创建默认迁移分支：base=当前本地分支。
+  C. 从 origin/main 创建默认迁移分支：选择后先只读校验 origin/main。
+  D. base=origin/xxx：用户指定远程基线，选择后先校验。
+  E. branch=feature/xxx：用户指定目标功能分支，选择后先校验/切换。
+  F. 暂停。
+
+  2、功能边界
+  A. 入口 + 主榜单闭环：纳入入口、榜单入口浮层、榜单详情页、数据闭环。
+  B. 仅入口：只纳入入口和入口浮层，不纳入完整榜单页。
+  C. 扩大到相邻链路：纳入入口、榜单、中奖弹窗、规则页、结算相关链路。
+
+  直接回复 1C，2A；或回复“分支 C，边界 A”；也可直接回复完整策略文本。
+  ```
+- 目标 feature 分支确认是目标侧门禁：启动目标侧 agent、目标项目 stash/pull/checkout/创建分支/业务修改前必须完成。确认菜单必须使用纯文本字母策略菜单，不得压缩成二选一；至少保留“继续当前本地分支”“从当前本地分支创建默认迁移分支”“从 origin/main 创建（选择后校验或已校验）”“base=origin/xxx”“branch=feature/xxx”“暂停”，并在条目中写明创建基线和适用场景。默认推荐顺序：用户显式指定分支优先；否则优先推荐“从 origin/main 创建”以获得干净迁移基线；若远程不可用或校验失败，推荐“从当前本地分支创建”；只有用户明确希望叠在当前分支上时才推荐“继续当前本地分支”。未提前远程探测时，远程基线/远程迁移分支可作为“选择后校验”策略展示；用户选择后再做只读远程校验，失败则阻塞说明原因。
 - 源侧只读 agent 可先行，但不得读取或修改目标项目业务文件。入口/边界确认关闭后，`source-code-closure-analyzer` 与资源预取可并行：资源预取只允许基于已确认入口、UIConfig、route、关键 Prefab 和缓存索引提前生成 Prefab/UUID/asset index；最终 `04-源资源闭包.md` 仍必须在第 3 步代码闭包完成后合并动态资源语义。
 - 第 5 步默认采用 `05x shared search -> 05a/05b/05c fan-out -> controller merge`：生成 fresh `05x-target-shared-search.compact.json` 后，`target-capability-analyzer`、`fidelity-risk-analyzer`、`resource-migration-planner` 可并行启动。三个 agent 只能写私有产物，缺少彼此结论时写 `unknown/pending-merge`，不得等待对方或等待最终 `05-目标差异分析.md`；最终由 controller 单点合并和裁定确认项。**05x fan-out 的唯一 hard input 是 `05x-target-shared-search.compact.json`；`logs/05x-target-capability-index.json`、`logs/05x-target-resource-index.json`、`logs/05x-target-uuid-index.json` 只能作为 optional performance cache / best-effort 旁路输入，缺失、partial、skipped 不得阻塞 05a/05b/05c 启动，不得进入 fan-out `required_artifacts`。** **05x 后 fan-out 是硬门禁：只要 `05x` fresh、目标分支门禁已关闭且无 blocking confirmation，Main/controller 必须在同一轮 controller turn 内完成 05a/05b/05c 的 state bootstrap、artifact-contract-manifest 更新、Agent 启动和 watchdog 安排；禁止只生成 05x 后结束回复、等待用户追问或等待下一轮。若任一 fan-out 启动失败，必须立即写入 checkpoint / controller-event-log / 阶段性 `使用效果监控.md`，并在聊天中说明阻塞原因与已启动/未启动清单。** Controller merge 必须执行 `controller_merge_resolution_summary`：按 `user-specified > backend-doc > target-existing > source > static-tool > inferred > unknown` 证据优先级裁决 05a/05b/05c 冲突；保真风险与 open confirmation 优先于复用/资源计划；未裁决的 blocking conflict 不得进入第 6 步，非阻塞冲突写入 `step6_constraints` / 第 7 步 review，不得卡主整个流程。
 - 第 2 步 entry-boundary 是 03/04 authoritative source closure 的硬前置：若存在多个合理入口、多个合理功能边界、`needs_user_confirmation=true`、`confirmation_topic: exact-entry|feature-boundary` 或任何未关闭的边界不清信号，Main/controller 不得启动 03/04 正式闭包；最多只允许继续非权威候选收集或 compact/cache 读取，必须先向用户确认并写入 `confirmed_entry` / `confirmed_boundary`。
 - 阶段写入权限分层是硬规则：01/02/03/04/05/07/final 只能只读源/目标业务文件或写 `.claude/cocos-feature-migration/**` 迁移分析产物、logs、compact、manifest；不得修改目标 `assets/**`、业务源码、prefab、meta、config。05c resource-migration-planner 只能规划 copy/reuse/rebind，不得实际复制资源。
 - `migration-applier` 是唯一允许修改目标业务代码和资源的 agent。
+- 资源复制必须以 confirmed boundary 内的 `source_path + uuid + referenced_by/entry_chain` 为准，不得按 basename、目录 glob 或“同名资源全量复制”扩散。04 必须标记资源 `boundary_status`，05c 的 copy plan 只能消费 `must_copy/rebind_required`，06 复制前必须执行 copy manifest preflight；同名候选未消歧或只被 excluded 模块引用的资源不得复制。
+- 第 6 步业务语义落地必须默认照源保真，禁止 AI 自行发挥：除 import 路径、bundle 名、UI 注册路径、资源根路径、目标已有公共能力接入等必要适配外，不得无证据改写源 feature 相关字符串常量、接口地址、枚举值、请求参数、默认值、分支逻辑、静态字段结构和关键方法结构。任何“看起来应该适配目标项目”的改动，必须先有 `user-specified`、`target-existing` 或 `backend-doc` 证据；没有证据时保持源值 / 源结构，并把建议适配写入待确认项。该规则在迁移动作时生效，不要求新增迁移后全量 diff 流程。
 - 第 6 步进入第 7 步前必须执行 `prefab script binding preflight`：关键 Prefab 的 expected scripts、目标脚本 `.meta` uuid、Prefab 文本 uuid / 短 uuid / 序列化脚本字段、Missing Script 特征必须写入 `prefab-static-check-cache.json`。可确定的一一映射问题由 `migration-applier` 修复；有歧义时不得自动改 Prefab，只输出 `repair_recommendations` 和 `must_not_run_automatically: true` 的 editor spot check 建议。
+- 第 6/7 步必须执行关键 Prefab `__uuid__` 目标侧闭合检查：对入口 Prefab、主面板 Prefab、列表项 Prefab 和 confirmed core boundary 内 Prefab 文本中的所有 `__uuid__` 全量提取，剥离 `@subid` 后用目标项目 `.meta` uuid reverse index 反查。未命中项必须分类为 `missing-business-resource | public-resource-unrebound | builtin-like | unknown`；除充分分类的 builtin-like/editor-only 项外，关键 Prefab `prefab_uuid_closure.missing_count` 必须为 0 才能进入 `static-pass`。确定缺失的独立 Prefab/字体/材质/SpriteFrame/默认头像/coin 等资源必须在第 6 步补迁、复用改绑或阻塞，不得只依赖脚本绑定检查。
 - 任何 agent 只能追加 `pending_confirmations_delta`，不得静默关闭 open 待确认项；只有主控可依据用户答复或明确证据关闭。
 - 默认快速静态迁移策略：第 1~7 步默认只做到 L1 静态结构验证；不探测、不运行 `tsc` / `cocos` / `npm run build` / `npm run typecheck`。
 - 所有产出的 Markdown 默认中文为主。
 - 不要把运行结果写到 skill 目录或 memory 目录；源侧产物写源项目，目标侧产物写目标项目。
 
 - Main/controller 必须把阶段调度历史写入 `<target_migration_dir>/logs/controller-event-log.jsonl`，聊天中只保留当前 runtime 摘要；最终回复引用 checkpoint / event log / manifest，不复述完整调度历史。
+- 必须假设主对话上下文会在任意时刻自动压缩。压缩、恢复、中断或长时间空档后的第一动作必须是 `compaction_resume_handshake`：读取 `controller-checkpoint.compact.md`、`logs/artifact-contract-manifest.json`、`迁移清单.md` 的 `phase_runtime` 和当前阶段 `*.state.compact.md`，按文件事实恢复阶段、待确认项、active agents、required artifacts 和下一跳；不得凭聊天记忆继续。主控在用户确认关闭后、agent 启动前后、DAG transition 前后、第 6 步业务写入前后、最终回复前都必须写入耐压缩落盘快照：checkpoint + manifest phase_runtime + 当前 state compact + controller event log。
 
 ## 上下文预算规则
 
@@ -198,6 +220,7 @@ scheduling_reliability_contract:
     file: <target_migration_dir>/controller-checkpoint.compact.md
     purpose: main/controller 当前调度快照，不保存完整事实
     max_lines_default: 80
+    must_include: [resume_cursor, last_user_decision, active_gate, transition_intent, required_artifacts, active_agents]
   state_bootstrap:
     owner: controller
     when: before_each_agent_spawn
@@ -212,6 +235,7 @@ scheduling_reliability_contract:
     preferred_tool: Monitor
     fallback: Bash run_in_background one-shot completion_or_timeout_check
     event_format: one_line_only
+    unavailable_policy: do_not_wait; resume_or_checkpoint_must_run_artifact_harvest
   artifact_harvest:
     triggers: [agent_result, idle_notification, watchdog_event, user_status_question, resume]
     default_reads: [checkpoint, current_state_compact]
@@ -219,6 +243,15 @@ scheduling_reliability_contract:
   dag_transition:
     owner: controller
     source_of_truth: required_artifacts + state_compact + manifest
+  compaction_resume_handshake:
+    triggers: [context_compaction, resume, interruption, user_status_question_after_long_gap]
+    first_action: read checkpoint + manifest + phase_runtime + current state compact
+    forbidden: continue_from_chat_memory
+    output: recovered_phase_or_blocking_gap
+  durability_barrier:
+    required_before: [ask_user, spawn_agent, dag_transition, business_write, final_response]
+    required_after: [user_confirmation_closed, agent_spawned, agent_harvested, business_write, phase_completed]
+    writes: [checkpoint, artifact_contract_manifest, current_state_compact, controller_event_log]
 ```
 
 #### State bootstrap
@@ -274,6 +307,7 @@ agent 启动后必须尽快写 heartbeat 文件，并在关键步骤边界更新
 
 - 优先使用 `Monitor`，监听 required artifacts 是否齐全、state compact 是否完成、soft timeout 是否到达。
 - 若 `Monitor` 不可用或权限不允许，使用 `Bash(run_in_background=true)` 启动 one-shot fallback：等到 artifacts 完整或 soft timeout 后退出并唤醒主控。
+- 若 `Monitor` 与 Bash fallback 都不可用、watchdog `task_id` 丢失、无法查询、或 `next_checkpoint_at/soft_timeout_at` 已过期，必须在 checkpoint 写 `watchdog.status=unavailable`，并把 `resume_cursor.safe_resume_action` 置为 `harvest`；恢复后不得执行 `wait_watchdog`，必须立即 artifact harvest。
 - watchdog 输出必须是单行事件，禁止输出完整文件内容。
 - watchdog 不做业务判断，只报告 `artifacts_ok`、`state_status`、`missing_count`、`reason`。
 
@@ -293,11 +327,12 @@ phase=04-source-resource-closure event=soft_timeout artifacts_ok=false missing_c
 2. 读取 `<target_migration_dir>/logs/artifact-contract-manifest.json`（若存在），按 canonical required artifacts 做轻量 schema validation；只检查路径、非空、JSON 可解析和 compact 顶层必要字段，不展开 evidence / logs。
 3. 检查 phase packet 中声明的 required artifacts 是否存在且非空。
 4. 读取当前阶段 `state_compact_artifact`。
-5. 若 required artifacts + state compact 完整，且 `artifact_schema_validation.validation_status=pass|partial` 且不阻塞下一阶段：按文件事实推进；若缺少短 `agent_result`，记录 `completed_with_agent_output_missing`。
-6. 若 canonical path 缺失但 alias / 相似产物存在：记录 `artifact_path_mismatch`，优先要求原 agent 或 controller helper 补写 canonical compact / phase-summary JSON；不得让 Main 展开大文件。
-7. 若缺失且未追问：最多追问该 agent 一次，要求写 state compact 或返回失败原因。
-8. 追问后仍缺失：同阶段最多重启一次，并把旧 agent 写入 `superseded_agents`。
-9. 重启后仍缺失：写 manifest 风险并阻塞，不得无限等待。
+5. 若 watchdog unavailable、watchdog 句柄不可查或 checkpoint 已过期，不等待 watchdog，直接按当前磁盘事实执行本次 harvest。
+6. 若 required artifacts + state compact 完整，且 `artifact_schema_validation.validation_status=pass|partial` 且不阻塞下一阶段：按文件事实推进；若缺少短 `agent_result`，记录 `completed_with_agent_output_missing`。
+7. 若 canonical path 缺失但 alias / 相似产物存在：记录 `artifact_path_mismatch`，优先要求原 agent 或 controller helper 补写 canonical compact / phase-summary JSON；不得让 Main 展开大文件。
+8. 若缺失且未追问：最多追问该 agent 一次，要求写 state compact 或返回失败原因。
+9. 追问后仍缺失：同阶段最多重启一次，并把旧 agent 写入 `superseded_agents`。
+10. 重启后仍缺失：写 manifest 风险并阻塞，不得无限等待。
 
 #### DAG transition
 
@@ -600,6 +635,8 @@ optional performance artifacts 不得进入 fan-out required_artifacts，缺失/
 
 若 controller 发现 checkpoint 中 `next_action` 指向可启动阶段，但 `active_agents` 为空、无 hard_stop、无 blocking confirmation，必须把它视为 `controller_transition_gap`，立即补启动下游阶段，并在 `logs/controller-event-log.jsonl` 和最终 `使用效果监控.md` 记录该 gap。
 
+`active_agents[]` 是 checkpoint / manifest / phase_runtime 的唯一活动 agent 事实源；不得以单个 `active_agent` 字段判断并行阶段。05a/05b/05c、修复回派与 verifier/final-report 等多 agent 场景必须逐项记录 `agent_id`、`phase`、`fanout_group`、`required_artifacts`、`restart_count`、`lease_status`、`watchdog_status`、`idempotency_key` 和 `status`。历史 `active_agent` 字段只能兼容读取为 `active_agents[0]`，不得写回为主状态。
+
 
 
 通用图示约定：所有阶段的 artifact harvest 都隐式执行 `phase_gate valid?` 检查，并在缺失/`schema_missing`/schema invalid 时进入 `phase_gate_missing_fallback_subflow`；流程图或 checkpoint 中只需要显式展开 03/04 harvest、05 controller merge、final-report 等高风险节点，不能因此理解为其他阶段不检查 `phase_gate`。
@@ -703,6 +740,7 @@ phase_packet:
     preferred_tool: Monitor
     fallback: Bash_run_in_background_one_shot
     event_max_lines: 1
+    unavailable_policy: immediate_artifact_harvest_on_resume_or_checkpoint
   artifact_contract_manifest_path: "<target_migration_dir>/logs/artifact-contract-manifest.json"
   artifact_schema_validation:
     enabled: true

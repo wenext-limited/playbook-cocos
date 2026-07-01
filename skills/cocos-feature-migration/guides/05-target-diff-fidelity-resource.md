@@ -311,7 +311,16 @@ controller_merge_packet:
 resource_decision_reason:
   copied_private_assets:
     - asset:
+      source_uuid:
+      canonical_source_path:
       reason: feature-private | source-only | prefab-required | no-target-equivalent
+      included_boundary_evidence: []
+      excluded_boundary_check:
+        checked: true
+        excluded_modules_hit: []
+        excluded_resource_paths_hit: []
+        excluded_referenced_by: []
+      same_basename_disambiguation: []
       evidence:
   reused_target_assets:
     - asset:
@@ -323,6 +332,8 @@ resource_decision_reason:
       reason: dynamic-remote | out-of-scope | runtime-loaded | replaced-by-target-existing
       evidence:
 ```
+
+05c 的 `copy_candidates` 只能来自第 4 步 `boundary_status in [must_copy, rebind_required]` 的资源，不得通过 basename glob、目录批量扫描或“同名资源全部复制”扩展。若源项目存在同 basename 多候选，资源计划必须以 `canonical_source_path + source_uuid` 双键确认选中项，并把其他同名候选写入 `same_basename_disambiguation`；未能证明 selected uuid 属于 confirmed boundary 时，必须 `blocks_step6: true` 或将该资源降为 `not_migrated_assets.reason: out-of-scope`。
 
 完成本步骤后：由主控或单一汇总者写回 `05-目标差异分析.md` 和 `目标差异摘要.compact.md`，并更新 `迁移清单.md` 中第 5 步状态。分析 agent 只能返回 `status_delta` / `pending_confirmations_delta`，不得直接覆盖最终 manifest 的确认状态。
 

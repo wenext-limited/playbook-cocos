@@ -160,20 +160,36 @@ controller_checkpoint:
   current_phase:
   last_completed_phase:
   next_action:
+  resume_cursor:
+    cursor_id: <phase>:<transition_or_gate>:<monotonic_counter>
+    last_durable_event_id:
+    last_user_confirmation_id:
+    active_gate: target-feature-branch | source-analysis-cache | exact-entry | feature-boundary | fidelity-risk | none
+    transition_intent: null | "04b->05x" | "05x->05abc" | "05merge->06" | "06->07" | "07->final"
+    transition_status: none | prepared | started | committed | blocked
+    idempotency_key:
+    safe_resume_action: harvest | wait_watchdog | ask_user | start_next_agent | controller_merge | repair | final_report | blocked
+    wait_watchdog_allowed_only_when: watchdog.status in [scheduled, running] and watchdog.task_id is present and queryable and checkpoint_not_overdue
   workflow_status: running | static-pass | partial-pass-static | blocked-static | blocked | completed | partial | abandoned
   open_confirmations: 0
-  active_agents: []
-  active_agent:
-    name:
-    agent_id:
-    phase:
-    status: pending | running | harvesting | completed | completed_with_agent_output_missing | agent_output_missing | failed | blocked | superseded
-    started_at:
-    lease_status: active | expired | completed | superseded
-    restart_count: 0
-    last_heartbeat_path:
-    last_heartbeat_at:
-    current_step:
+  active_agents:
+    - name:
+      agent_id:
+      phase:
+      fanout_group: null | "05abc" | "repair" | "final"
+      status: pending | running | harvesting | completed | completed_with_agent_output_missing | agent_output_missing | failed | blocked | superseded
+      started_at:
+      lease_status: active | expired | completed | superseded
+      restart_count: 0
+      required_artifacts: []
+      required_artifacts_existing: []
+      required_artifacts_missing: []
+      watchdog_status: scheduled | running | completed | timeout | unavailable
+      idempotency_key:
+      last_heartbeat_path:
+      last_heartbeat_at:
+      current_step:
+  active_agent: deprecated_compat_read_only
   watchdog:
     enabled: true | false
     tool: Monitor | Bash | unavailable
@@ -195,6 +211,16 @@ controller_checkpoint:
     on_soft_timeout: prompt_once_then_restart_or_block
   final_status:
   last_user_decision:
+    decision_id:
+    gate:
+    selected_option:
+    selected_text:
+    closed_at:
+    persisted_to:
+      - migration_manifest
+      - source_manifest
+      - state_compact
+      - event_log
   source_analysis_ref:
   target_manifest_ref:
   compact_refs:
@@ -208,9 +234,69 @@ controller_checkpoint:
 写回规则：
 
 1. 每个阶段开始、完成、阻塞、agent 收割、用户确认关闭后，都应更新 checkpoint。
-2. main 恢复任务时优先读取 checkpoint + `迁移清单.md`；只有二者冲突、缺失或 stale 时才读多个完整 compact。
-3. checkpoint 不能替代 manifest / compact / 步骤 md；它只用于调度和压缩 main 上下文。
-4. checkpoint 中不得粘贴完整代码清单、完整资源清单或完整 CLI 输出。
+2. checkpoint 必须包含 `resume_cursor`。`transition_intent` 表示主控下一跳意图，`transition_status` 表示该意图是否已经准备/启动/提交；恢复时必须先消费该 cursor，保证 transition 可幂等执行。
+3. `active_agents[]` 是唯一活动 agent 事实源。并行 fan-out、修复回派和最终阶段都必须逐项记录；历史 `active_agent` 字段只能兼容读取为 `active_agents[0]`，不得写回为主状态。
+4. main 恢复任务时优先读取 checkpoint + `迁移清单.md`；只有二者冲突、缺失或 stale 时才读多个完整 compact。
+5. checkpoint 不能替代 manifest / compact / 步骤 md；它只用于调度和压缩 main 上下文。
+6. checkpoint 中不得粘贴完整代码清单、完整资源清单或完整 CLI 输出。
+
+### 自动压缩恢复协议（P0）
+
+主对话可能在任何工具调用之间自动压缩。恢复后的 main/controller 必须把自己当作“新进程”，先从磁盘重建调度状态：
+
+```yaml
+compaction_resume_handshake:
+  trigger:
+    - main context compacted
+    - conversation resumed
+    - user asks status after long gap
+    - agent result arrives after interruption
+  first_reads:
+    - controller-checkpoint.compact.md
+    - logs/artifact-contract-manifest.json
+    - 迁移清单.md phase_runtime
+    - current phase state compact
+  derive:
+    - current_phase
+    - active_agents
+    - open_confirmations
+    - last_user_decision
+    - required_artifacts declared/existing/missing
+    - resume_cursor.transition_intent/status
+    - safe_resume_action
+  forbidden:
+    - continue_from_chat_memory
+    - assume_previous_tool_result_if_not_persisted
+    - ask_user_again_for_a_closed_confirmation
+    - start_next_agent_without_updating_checkpoint_and_manifest
+```
+
+恢复判定：
+
+- `transition_status=prepared` 且下游 agent 未启动：若无阻塞确认项，执行 `start_next_agent`，并把状态推进为 `started`。
+- `transition_status=started` 且 required artifacts 已齐：执行 artifact harvest，写 `committed`，再进入下一跳。
+- `transition_status=started` 但 heartbeat fresh，且 watchdog `scheduled/running`、`task_id` 可查询、checkpoint 未过期：等待 watchdog，不重启。
+- `transition_status=started` 但 watchdog `unavailable`、`task_id` 丢失/不可查询、或 `next_checkpoint_at/soft_timeout_at` 已过期：不得等待 watchdog，立即执行 artifact harvest。
+- `transition_status=started` 且 heartbeat stale/超时：追问一次或重启一次。
+- `transition_status=committed`：不得重复执行同一业务写入或重复启动同一阶段；只继续下一 cursor。
+- `last_user_decision.persisted_to` 不完整：先补写 manifest/state/event log，再关闭确认项；不得重新问同一个问题。
+
+### 耐压缩落盘屏障（P0）
+
+以下边界是主控的 durability barrier，必须先落盘再继续：
+
+| 边界 | 必须写入 | 目的 |
+|---|---|---|
+| 向用户展示确认菜单前 | checkpoint、manifest open confirmation、event log | 压缩后知道正在等哪个门禁 |
+| 用户答复后 | checkpoint.last_user_decision、对应 manifest/compact、event log | 压缩后不会重复询问或误用旧选项 |
+| 启动 agent 前 | state bootstrap、manifest required artifacts、checkpoint resume_cursor | 压缩后知道哪个 agent 应该存在 |
+| agent 启动后 | checkpoint active_agents[]、watchdog 状态、event log | 压缩后可 harvest 或等待 |
+| artifact harvest 后 | state compact、manifest phase status、checkpoint transition cursor、event log | 压缩后可继续下一跳 |
+| DAG transition 前后 | checkpoint transition_intent/status、manifest、event log | 压缩后能幂等补启动或跳过已提交 transition |
+| 第 6 步业务写入前后 | migration-progress.json、06 state compact、checkpoint、event log | 防止压缩后重复写入或漏写自检 |
+| 最终回复前 | 最终状态摘要、迁移清单 completed 状态、manifest phase_runtime closed、event log | 防止回复后状态文件仍停在 running |
+
+若任一屏障无法写入，主控必须记录 `controller_durability_gap` 并暂停；不得进入第 6 步业务写入或最终宣称完成。
 
 ### Resume 时的可靠调度恢复
 
@@ -218,13 +304,15 @@ controller_checkpoint:
 
 1. 读取 `controller-checkpoint.compact.md`。
 2. 读取 `迁移清单.md` 的 `phase_runtime` 必要片段。
-3. 若 checkpoint 显示有 active agent，读取当前阶段 state compact；若 state 缺失，再读 heartbeat。
+3. 若 checkpoint 显示 `active_agents[]` 非空，读取当前阶段 state compact；若 state 缺失，再读 heartbeat。
 4. 检查 checkpoint 中 declared required artifacts，并优先用 `logs/artifact-contract-manifest.json` 做 canonical path / alias / 非空轻量校验。
-5. 若 artifacts + state compact 完整，按 `completed_with_agent_output_missing` 或 `agent_harvest` 收割，并立即执行 DAG transition 原子推进：更新 checkpoint / event log / artifact manifest，bootstrap 并启动下一阶段 agent，安排 watchdog。不得只写 `next_action` 后暂停。
-6. 若 artifacts 缺失但 heartbeat fresh 且未超时，继续等待 watchdog。
-7. 若 heartbeat stale 或 soft timeout，执行追问一次 / 重启一次 / 阻塞规则。
-9. 若恢复时发现 checkpoint / manifest / 迁移清单显示 `next_action` 指向可启动阶段，但 `active_agents` 为空或缺少预期 agent，且无 hard stop / blocking confirmation，必须判定为 `controller_transition_gap`：立即补做下游阶段 bootstrap + Agent 启动 + watchdog，并写入 `logs/controller-event-log.jsonl`；不得只向用户汇报“下一步将启动”。
-10. 对 `04 completed -> 05x -> 05a/05b/05c`，恢复时若 `05x-target-shared-search.compact.json` 已存在且 fresh、目标分支门禁已关闭、05a/05b/05c 产物缺失且无 active agents，必须立即启动 05a/05b/05c fan-out；不得把 05x 当作完成态停留。
+5. 读取并消费 `resume_cursor`：若 transition 已 committed，不得重复执行；若 transition prepared/started 但未提交，按幂等规则补启动、harvest，或仅在 watchdog 可用可查且未过期时等待。
+6. 若 artifacts + state compact 完整，按 `completed_with_agent_output_missing` 或 `agent_harvest` 收割，并立即执行 DAG transition 原子推进：更新 checkpoint / event log / artifact manifest，bootstrap 并启动下一阶段 agent，安排 watchdog。不得只写 `next_action` 后暂停。
+7. 若 artifacts 缺失但 heartbeat fresh、watchdog 可用可查且未超时，继续等待 watchdog。
+8. 若 watchdog unavailable / task_id 丢失或不可查询 / checkpoint 已过期，立即执行 artifact harvest；仍缺失时按追问一次 / 重启一次 / 阻塞规则处理。
+9. 若 heartbeat stale 或 soft timeout，执行追问一次 / 重启一次 / 阻塞规则。
+10. 若恢复时发现 checkpoint / manifest / 迁移清单显示 `next_action` 指向可启动阶段，但 `active_agents` 为空或缺少预期 agent，且无 hard stop / blocking confirmation，必须判定为 `controller_transition_gap`：立即补做下游阶段 bootstrap + Agent 启动 + watchdog，并写入 `logs/controller-event-log.jsonl`；不得只向用户汇报“下一步将启动”。
+11. 对 `04 completed -> 05x -> 05a/05b/05c`，恢复时若 `05x-target-shared-search.compact.json` 已存在且 fresh、目标分支门禁已关闭、05a/05b/05c 产物缺失且 `active_agents[]` 缺少对应 agent，必须立即补启动缺失的 05a/05b/05c fan-out；不得把 05x 当作完成态停留。
 
 
 旧产物没有 heartbeat 时，不得判定失败；应记录 `legacy_no_heartbeat: true`，然后按 required artifacts + state compact 继续。
@@ -281,9 +369,9 @@ Main 最终回复不保存完整调度历史，只引用 event log、checkpoint 
 
 需要询问时，提供以下选择：
 
-1. **复用已有源分析，跳过重跑**：直接复用 `02/03/04`，从目标项目差异分析继续；
-2. **基于已有结果做增量复核**：读取旧分析，仅核对关键入口、关键闭包、关键资源是否变化；
-3. **忽略旧结果，重新完整分析**：把源分析按当前基线重建。
+A. **复用已有源分析，跳过重跑**：直接复用 `02/03/04`，从目标项目差异分析继续；
+B. **基于已有结果做增量复核**：读取旧分析，仅核对关键入口、关键闭包、关键资源是否变化；
+C. **忽略旧结果，重新完整分析**：把源分析按当前基线重建。
 
 建议使用类似下面的标准提示模板：
 
@@ -295,10 +383,10 @@ Main 最终回复不保存完整调度历史，只引用 event log、checkpoint 
 - 已有产物：源分析清单.md、02-源入口候选.md、03-源代码闭包.md、04-源资源闭包.md
 - 已确认入口（若有）：<confirmed-entry-or-null>
 
-请确认本轮如何处理这份历史源分析：
-1. 复用已有源分析（直接跳过源侧重跑，进入目标差异分析）
-2. 增量复核（基于旧结果，只核对关键入口 / 闭包 / 资源变化）
-3. 重新完整分析（忽略旧结果，按当前基线全量重建）
+请确认本轮如何处理这份历史源分析，直接回复字母或文本即可：
+A. 复用已有源分析（直接跳过源侧重跑，进入目标差异分析）
+B. 增量复核（基于旧结果，只核对关键入口 / 闭包 / 资源变化）
+C. 重新完整分析（忽略旧结果，按当前基线全量重建）
 ```
 
 处理要求：
@@ -372,7 +460,6 @@ phase_runtime:
   last_completed_phase: 07-final-report
   workflow_status: static-pass | partial-pass-static | blocked-static
   active_agents: []
-  active_agent: null
   watchdog:
     enabled: false
     status: completed

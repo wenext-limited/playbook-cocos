@@ -137,6 +137,29 @@ index_consumption:
 
 你必须把 prefab/resource basename/uuid/copy/reuse/rebind 搜索结果写入 `<target_migration_dir>/logs/05c-resource-search-cache.json`。优先复用 fresh cache；缺失或 stale 时只 targeted refresh。不要只写 txt/Markdown。agent_result.key_outputs 必须包含 `resource_search_cache_status` 和路径。
 
+## P0：copy candidate 准入与同名资源消歧
+
+`resource_copy_plan` / `copy_candidates` 只能来自第 4 步资源闭包中 `boundary_status in [must_copy, rebind_required]` 的资源。禁止通过 basename glob、目录批量扫描或“同名资源全部复制”扩大范围。
+
+每个 copy candidate 必须携带：
+
+```yaml
+copy_candidate_boundary_check:
+  asset:
+  canonical_source_path:
+  source_uuid:
+  selected_by: critical_prefab_uuid_refs | included_dynamic_load | UIConfig_route | code_import
+  included_boundary_evidence: []
+  excluded_boundary_check:
+    checked: true
+    excluded_modules_hit: []
+    excluded_resource_paths_hit: []
+    excluded_referenced_by: []
+  same_basename_disambiguation: []
+```
+
+若 `source_uuid` / `canonical_source_path` / `included_boundary_evidence` 缺失，或同 basename 多候选未完成 uuid+path 消歧，必须将该资源移出 copy plan，并写入 `conflict_candidates`；影响核心资源时 `blocks_step6: true`。只被 excluded module / excluded boundary 引用的资源必须进入 `not_migrated_assets.reason: out-of-scope`。
+
 
 ## P0：fanout gate fields
 
@@ -251,6 +274,9 @@ core_sections_complete:
 - resource_copy_plan:
 - resource_reuse_plan:
 - resource_rebind_plan:
+- copy_candidate_boundary_checks:
+- same_basename_disambiguation:
+- excluded_by_boundary_assets:
 - transitional_dir_required:
 - transitional_dirs:
   - path:

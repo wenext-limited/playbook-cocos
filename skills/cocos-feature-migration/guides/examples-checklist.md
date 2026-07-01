@@ -75,7 +75,7 @@ find assets -iname "*rank*" -o -iname "*leaderboard*"
 
 ## 检查清单
 
-- [ ] 已确认目标项目 feature 分支处理方式（必须在创建阶段 agent team、启动任何子 agent、以及目标项目 stash / pull / checkout / 业务修改之前完成）：默认建议分支为 `feature/migration_<feature-slug>`；若用户提供 `feature/xxx` 则按用户指定；若当前非默认分支与本次 feature_slug 不一致，已用一层、简单明了的策略确认：从 `origin/main` 创建 / 继续当前本地分支 / 从当前本地分支对应的有效远程上游创建（仅有效时展示）/ 切换已存在迁移分支（仅检测到时展示）/ `base=origin/xxx` 从指定远程基线创建 / `branch=feature/xxx` 改用指定目标分支 / 暂停；当前不可执行策略不得进入编号列表，但自定义基线、自定义分支和暂停策略必须保留。
+- [ ] 已确认目标项目 feature 分支处理方式（必须在创建阶段 agent team、启动任何子 agent、以及目标项目 stash / pull / checkout / 业务修改之前完成）：默认建议分支为 `feature/migration_<feature-slug>`；若用户提供 `feature/xxx` 则按用户指定；若当前非默认分支与本次 feature_slug 不一致，已用一层、简单明了的字母策略菜单确认：从 `origin/main` 创建 / 继续当前本地分支 / 从当前本地分支对应的有效远程上游创建（仅有效时展示）/ 切换已存在迁移分支（仅检测到时展示）/ `base=origin/xxx` 从指定远程基线创建 / `branch=feature/xxx` 改用指定目标分支 / 暂停；当前不可执行策略不得进入字母选项列表，但自定义基线、自定义分支和暂停策略必须保留。
 - [ ] 已完成第 1 步 Git 状态检查，并记录是否执行 stash / pull
 - [ ] 已明确后续子步骤不再重复执行 stash / clean / pull
 - [ ] 已按当前平台确认 `cli-anything-cocoscreator` 可用；若不可用，已进入 degraded mode 并记录资源闭包置信度 / 最终状态上限，而不是默认完全卡住
