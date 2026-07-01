@@ -42,6 +42,7 @@ playbook-cocos/
 │   ├── cocos-coin-animation/SKILL.md      # 贝塞尔曲线飞币动画
 │   ├── cocos-data-persistence/SKILL.md    # 数据持久化与缓存策略
 │   ├── cocos-playbook-sync/SKILL.md       # 同步/上传 playbook-cocos 变更
+│   ├── cocos-playbook-adapter/SKILL.md    # 适配 Claude/Codex/Cursor 等 AI 工具
 │   ├── oops-framework/SKILL.md            # OOPS 框架核心（12 子模块）
 │   ├── oops-ecs-pattern/SKILL.md          # ECS 三层架构
 │   ├── oops-event-system/SKILL.md         # 事件系统与消息分发
@@ -79,6 +80,7 @@ playbook-cocos/
 | `cocos-coin-animation` | 贝塞尔曲线飞币动画、多方向路径、对象池 |
 | `cocos-data-persistence` | 三层存储架构、前缀隔离、内存缓存 |
 | `cocos-playbook-sync` | 同步本地 `playbook-cocos`；无修改时仅更新，有修改时让用户选择丢弃或提交 PR |
+| `cocos-playbook-adapter` | 将本地 `playbook-cocos` 适配到 Claude CLI、Codex / Codex CLI、Cursor、Windsurf、Cline / Roo Code 等 AI 工具 |
 
 ### OOPS 框架技能（`oops-` 前缀）
 
