@@ -80,7 +80,7 @@ playbook-cocos/
 | `cocos-coin-animation` | 贝塞尔曲线飞币动画、多方向路径、对象池 |
 | `cocos-data-persistence` | 三层存储架构、前缀隔离、内存缓存 |
 | `cocos-playbook-sync` | 同步本地 `playbook-cocos`；无修改时仅更新，有修改时让用户选择丢弃或提交 PR |
-| `cocos-playbook-adapter` | 将本地 `playbook-cocos` 适配到 Claude CLI、Codex / Codex CLI、Cursor、Windsurf、Cline / Roo Code 等 AI 工具 |
+| `cocos-playbook-adapter` | 在 Claude CLI、Codex / Codex CLI、Cursor、Windsurf、Cline / Roo Code 等 AI 工具本地目录下用软链接引用 `~/.playbook-cocos` |
 
 ### OOPS 框架技能（`oops-` 前缀）
 

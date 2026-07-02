@@ -53,17 +53,17 @@ git clone https://github.com/wenext-limited/playbook-cocos.git .playbook-cocos
 test -f ~/.playbook-cocos/README.md && echo "playbook-cocos installed"
 ```
 
-### 4. 询问是否配置 AI 工具入口
+### 4. 询问是否运行 AI 工具本地适配
 
-首次安装验证通过后，AI 必须询问用户是否继续按照 `~/.playbook-cocos/skills/cocos-playbook-adapter/SKILL.md` 为业务项目配置 AI 工具入口：
+首次安装验证通过后，AI 必须询问用户是否继续按照 `~/.playbook-cocos/skills/cocos-playbook-adapter/SKILL.md` 为本机 AI 工具配置本地软链接适配：
 
 ```text
-playbook-cocos 已完成首次安装。是否继续按 cocos-playbook-adapter 为业务项目配置 AI 工具入口？
+playbook-cocos 已完成首次安装。是否继续运行 cocos-playbook-adapter，为本机 AI 工具建立指向 ~/.playbook-cocos 的本地软链接？
 A. 是：继续读取并执行 ~/.playbook-cocos/skills/cocos-playbook-adapter/SKILL.md
-B. 否：结束安装流程，后续需要接入 AI 工具时再配置
+B. 否：结束安装流程，后续需要适配 AI 工具时再运行该技能
 ```
 
-只有用户明确选择 A 后，才读取并执行 `cocos-playbook-adapter` 技能；如果用户选择 B 或未明确选择，不要自动创建或修改业务项目中的 `AGENTS.md`、`CLAUDE.md`、`.cursorrules`、`.windsurfrules`、`.clinerules`、符号链接或 Windows junction。
+只有用户明确选择 A 后，才读取并执行 `cocos-playbook-adapter` 技能；如果用户选择 B 或未明确选择，不要自动创建本地软链接 / Windows junction，也不要修改业务项目中的 `AGENTS.md`、`CLAUDE.md`、`.cursorrules`、`.windsurfrules`、`.clinerules` 等规则文件。
 
 ---
 
@@ -107,17 +107,17 @@ Test-Path "$env:USERPROFILE\.playbook-cocos\README.md"
 
 返回 `True` 表示安装成功。
 
-### 4. 询问是否配置 AI 工具入口
+### 4. 询问是否运行 AI 工具本地适配
 
-首次安装验证通过后，AI 必须询问用户是否继续按照 `%USERPROFILE%\.playbook-cocos\skills\cocos-playbook-adapter\SKILL.md` 为业务项目配置 AI 工具入口：
+首次安装验证通过后，AI 必须询问用户是否继续按照 `%USERPROFILE%\.playbook-cocos\skills\cocos-playbook-adapter\SKILL.md` 为本机 AI 工具配置本地链接适配：
 
 ```text
-playbook-cocos 已完成首次安装。是否继续按 cocos-playbook-adapter 为业务项目配置 AI 工具入口？
+playbook-cocos 已完成首次安装。是否继续运行 cocos-playbook-adapter，为本机 AI 工具建立指向 %USERPROFILE%\.playbook-cocos 的本地链接？
 A. 是：继续读取并执行 %USERPROFILE%\.playbook-cocos\skills\cocos-playbook-adapter\SKILL.md
-B. 否：结束安装流程，后续需要接入 AI 工具时再配置
+B. 否：结束安装流程，后续需要适配 AI 工具时再运行该技能
 ```
 
-只有用户明确选择 A 后，才读取并执行 `cocos-playbook-adapter` 技能；如果用户选择 B 或未明确选择，不要自动创建或修改业务项目中的 `AGENTS.md`、`CLAUDE.md`、`.cursorrules`、`.windsurfrules`、`.clinerules`、符号链接或 Windows junction。
+只有用户明确选择 A 后，才读取并执行 `cocos-playbook-adapter` 技能；如果用户选择 B 或未明确选择，不要自动创建本地软链接 / Windows junction，也不要修改业务项目中的 `AGENTS.md`、`CLAUDE.md`、`.cursorrules`、`.windsurfrules`、`.clinerules` 等规则文件。
 
 ---
 
@@ -163,19 +163,19 @@ Windows 路径对应为：
 %USERPROFILE%\.playbook-cocos
 ```
 
-## 接入不同 AI 工具
+## 适配不同 AI 工具
 
-安装完成后，不建议把整份 `playbook-cocos` 复制到业务项目中。推荐在业务项目根目录为不同 AI 工具创建轻量入口文件，让入口文件引用用户级安装目录。
+安装完成后，不建议把整份 `playbook-cocos` 复制到业务项目中，也不默认修改业务项目规则。推荐在不同 AI 工具的本地规则 / 技能目录下建立软链接或 Windows junction，指向用户级安装目录。
 
-常见入口文件：
+典型适配目标：
 
-- Claude CLI / Claude Code：`CLAUDE.md`
-- Codex / Codex CLI：`AGENTS.md`
-- Cursor：`.cursorrules` 或 `.cursor/rules/*.mdc`
-- Windsurf：`.windsurfrules`
-- Cline / Roo Code：`.clinerules`、`.roo/rules/*.md` 或 custom instructions
+- Claude CLI / Claude Code：用户级配置 / 技能目录中的 `playbook-cocos` 链接
+- Codex / Codex CLI：`~/.codex/references/playbook-cocos` 以及 `~/.codex/skills/<skill-name>` 链接
+- Cursor：用户级 rules / context 目录中的 `playbook-cocos` 链接，若工具限制只读项目规则则输出兜底说明
+- Windsurf：用户级 rules / memories / context 目录中的 `playbook-cocos` 链接
+- Cline / Roo Code：用户级规则目录中的 `playbook-cocos` 链接，或 custom instructions 兜底文本
 
-如需自动生成或更新这些入口文件，请使用 `skills/cocos-playbook-adapter/SKILL.md`。该技能会先让用户选择目标 AI 工具、目标项目目录和适配方式，并支持 macOS / Windows 的轻量入口文件、符号链接或 Windows junction。
+如需自动检查或创建这些链接，请使用 `skills/cocos-playbook-adapter/SKILL.md`。该技能会先让用户选择目标 AI 工具、是否实际创建链接，以及同名链接 / 目录已存在时的处理方式；不会默认修改业务项目规则文件。
 
 ---
 
@@ -187,5 +187,5 @@ Windows 路径对应为：
 - 已存在目录时只允许安全检查，**不要自动 pull、fetch、删除、覆盖或强制重置**。
 - 如果检测到 `~/.playbook-cocos` 已存在且包含 `.git`，必须暂停同步并向用户说明原因，等待用户指示。
 - 本文档只负责**首次安装**，不负责后续的同步/更新；目标目录已存在时一律暂停，不自动 pull。
-- 首次安装验证通过后，必须询问用户是否继续按 `skills/cocos-playbook-adapter/SKILL.md` 为业务项目配置 AI 工具入口；只有用户明确同意后才可进入该技能流程。
+- 首次安装验证通过后，必须询问用户是否继续按 `skills/cocos-playbook-adapter/SKILL.md` 为本机 AI 工具建立指向 `~/.playbook-cocos` 的本地软链接 / junction；只有用户明确同意后才可进入该技能流程。
 - 安装完成后，向用户返回实际安装路径和验证结果。
