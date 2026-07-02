@@ -45,7 +45,7 @@
   同步本地 `playbook-cocos` 仓库与 GitHub 远程时使用。无本地修改时只做快进更新；有本地修改时列出变更，让用户选择丢弃后更新，或进入 PR 提交流程上传改动。
 
 - `cocos-playbook-adapter/`
-  将本地 `playbook-cocos` 知识库适配到 Claude CLI、Codex / Codex CLI、Cursor、Windsurf、Cline / Roo Code 等 AI 工具时使用。支持 macOS 和 Windows，通过轻量入口文件或快捷方式引用用户级安装目录。
+  将本地 `playbook-cocos` 知识库适配到 Claude CLI、Codex / Codex CLI、Cursor、Windsurf、Cline / Roo Code 等 AI 工具时使用。支持 macOS 和 Windows，默认在工具本地规则 / 技能目录下用软链接或 junction 引用用户级安装目录，不修改业务项目规则。
 
 ### `oops-`
 
