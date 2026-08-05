@@ -31,7 +31,7 @@ allowed-tools: [Read, Write, Edit, Bash, Agent, SendMessage, Monitor, TaskCreate
 - 参数预检是所有调度前的最高优先级门禁：未能明确解析 `source_project`、`target_project`、`feature_name` 时，或当前目录为空/无关且用户未提供完整路径时，必须暂停向用户索要源项目路径、目标项目路径和功能名；不得创建 team、不得启动 Agent、不得执行目标侧 Git/业务修改。
 - 开始迁移分析前必须探测 ts-graph MCP；涉及 TS/JS 代码分析时优先使用 ts-graph。若 ts-graph 不可用，不默认完全卡住流程：进入 `execution_mode: degraded`，用 `rg`/Read/import 文本扫描降级完成代码闭包，并把代码依赖置信度和最终状态上限写入 manifest / compact / 使用效果监控。
 - 开始迁移分析前必须按当前平台检查 `cli-anything-cocoscreator`；涉及 Cocos 资源、Prefab、UUID、`.meta` 时优先使用该工具或其缓存索引。若 CLI 不可用，不默认完全卡住流程：进入 `execution_mode: degraded`，用 Prefab / `.meta` 文本扫描、uuid reverse index、缓存索引降级分析；关键 Prefab / 资源无法静态证明时最终最高 `partial-pass-static` 或 `blocked-static`。
-- `cli-anything-cocoscreator` 的具体命令、参数和示例不得在本 skill 内重复维护；必须按需直接引用 GitHub Markdown：[`README.md`](https://github.com/OscargwStudio/cli-anything-cocoscreator/blob/main/README.md)、[`COCOSCREATOR.md`](https://github.com/OscargwStudio/cli-anything-cocoscreator/blob/main/COCOSCREATOR.md)。不得引用本地 clone 路径作为说明来源。
+- `cli-anything-cocoscreator` 的具体命令、参数和示例不得在本 skill 内重复维护；必须按需直接引用 GitHub Markdown：[`README.md`](https://github.com/wenext-limited/cli-anything-cocoscreator/blob/main/README.md)、[`COCOSCREATOR.md`](https://github.com/wenext-limited/cli-anything-cocoscreator/blob/main/COCOSCREATOR.md)。不得引用本地 clone 路径作为说明来源。
 - 所有需要用户选择的确认菜单必须使用大写字母选项（`A/B/C/...`），不得使用 `1/2/3/...` 作为可回复选项；提示语写“直接回复字母或文本即可”。数字只允许用于过程步骤、检查项、问题分组编号或文档内部有序说明，不得作为目标分支策略、迁移范围/功能边界、源分析缓存处理、保真风险确认等菜单内的可回复选项。
 - 当同一轮需要向用户展示多个确认菜单时，必须使用数字只做问题分组标题，例如 `1、目标分支策略`、`2、功能边界`；每个问题分组内的菜单选项都必须从 `A` 重新开始，不得跨分组延续为 `D/E/F/...`。提示语必须明确可回复格式，例如“直接回复 `1C，2A`，或回复 `分支 C，边界 A`；也可直接回复完整策略文本”。示例：
   ```text

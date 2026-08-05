@@ -32,7 +32,7 @@ cli-anything-cocoscreator asset prefab-check --help
 
 - 命令不存在或执行失败：停止 review，询问用户是否安装，不得自动安装。
 - 安装提示必须包含：`未检测到 cli-anything-cocoscreator，无法执行 Scene / Prefab 资源完整性检查。是否现在安装？`
-- 安装说明：`https://github.com/OscargwStudio/cli-anything-cocoscreator`
+- 安装说明：`https://github.com/wenext-limited/cli-anything-cocoscreator`
 - 命令存在但资源检查 JSON 不包含顶层 `problem_file_count`、`issue_count` 或文件级 `issues`：视为旧版，停止 review 并询问用户是否更新。
 - 用户明确拒绝安装或更新时，只有在用户明确同意跳过资源检查后才可继续，并在报告中写明未执行原因。
 
