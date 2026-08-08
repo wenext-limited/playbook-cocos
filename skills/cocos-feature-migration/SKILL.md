@@ -1,6 +1,8 @@
 ---
 name: cocos-feature-migration
-description: 在两个 Cocos Creator 项目之间迁移业务功能时使用，包括入口定位、代码图谱分析、依赖资源盘点、缺失资源补齐、代码落地与路径修复。当用户说“迁移功能”、“移植功能”、“从项目A迁到项目B”、“migrate feature”或描述跨项目复制某个业务模块时使用此 skill。
+description: 仅限用户显式主动调用的 Cocos Creator 跨项目业务功能迁移工作流，包括入口定位、代码图谱分析、依赖资源盘点、缺失资源补齐、代码落地与路径修复。不得根据普通自然语言提示自动选择或加载此 Skill。
+disable-model-invocation: true
+user-invocable: true
 argument-hint: "[源项目路径] [目标项目路径] [功能名]"
 allowed-tools: [Read, Write, Edit, Bash, Agent, SendMessage, Monitor, TaskCreate, TaskGet, TaskList, TaskUpdate, mcp__ts-graph__ts_graph_stats, mcp__ts-graph__ts_graph_build, mcp__ts-graph__ts_search_symbols, mcp__ts-graph__ts_get_file_context, mcp__ts-graph__ts_query_symbol, mcp__ts-graph__ts_get_review_context]
 ---
