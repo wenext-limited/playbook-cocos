@@ -1,0 +1,7 @@
+interface:
+  display_name: "Cocos 功能迁移"
+  short_description: "仅供主动调用的 Cocos Creator 跨项目功能迁移工作流"
+  default_prompt: "使用 $cocos-feature-migration 迁移指定的 Cocos Creator 业务功能。"
+
+policy:
+  allow_implicit_invocation: false
