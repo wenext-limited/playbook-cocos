@@ -7,6 +7,7 @@ import argparse
 import base64
 import concurrent.futures
 import json
+import math
 import os
 import re
 import stat
@@ -39,6 +40,10 @@ ENVIRONMENTS = {
 IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 ALLOWED_START = re.compile(r"^\s*(?:SELECT\b|WITH\b[\s\S]*?\bSELECT\b|SHOW\b|DESC(?:RIBE)?\b|EXPLAIN\b|EXISTS\b)", re.I)
 FORBIDDEN = re.compile(r"\b(?:INSERT|ALTER|DROP|TRUNCATE|DELETE|UPDATE|OPTIMIZE|SYSTEM|KILL|CREATE|RENAME|ATTACH|DETACH|GRANT|REVOKE)\b", re.I)
+PROTECTED_QUERY_SETTINGS = re.compile(
+    r"\b(?:max_execution_time|timeout_before_checking_execution_speed|timeout_overflow_mode|max_memory_usage|max_bytes_to_read|max_rows_to_read|read_overflow_mode)\b",
+    re.I,
+)
 MAX_QUERY_WINDOW_DAYS = 14
 INTERVAL_SECONDS = {
     "SECOND": 1,
@@ -83,6 +88,26 @@ def validate_identifier(value: str, label: str) -> str:
     if not IDENTIFIER.fullmatch(value):
         raise QueryFailure(f"Invalid {label}: {value!r}", 1)
     return value
+
+
+def positive_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("must be an integer") from error
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be greater than zero")
+    return parsed
+
+
+def positive_float(value: str) -> float:
+    try:
+        parsed = float(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("must be a number") from error
+    if not math.isfinite(parsed) or parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a finite number greater than zero")
+    return parsed
 
 
 def parse_time_expression(expression: str) -> tuple[str, float | datetime] | None:
@@ -180,6 +205,17 @@ def validate_sql(
         raise QueryFailure("Only read-only SELECT/SHOW/DESCRIBE/EXPLAIN/EXISTS queries are allowed", 3)
     if re.search(r"\bINTO\s+OUTFILE\b|\bFORMAT\s+[A-Za-z]", normalized, re.I):
         raise QueryFailure("INTO OUTFILE and caller-supplied FORMAT clauses are not allowed", 3)
+    settings_clause = re.search(r"\bSETTINGS\b([\s\S]*?)(?:\bFORMAT\b|$)", normalized, re.I)
+    protected_settings = (
+        sorted({match.group(0).lower() for match in PROTECTED_QUERY_SETTINGS.finditer(settings_clause.group(1))})
+        if settings_clause
+        else []
+    )
+    if protected_settings:
+        raise QueryFailure(
+            f"Resource limit settings must use query_ck.py CLI options, not SQL SETTINGS: {protected_settings}",
+            3,
+        )
     if re.search(r"\bevent_value\b|\bJSONExtract\w*\s*\(", normalized, re.I) and not allow_event_value:
         raise QueryFailure(
             "event_value/JSONExtract fallback is disabled by default; use top-level typed columns, or add --allow-event-value after confirming fallback is necessary",
@@ -269,13 +305,43 @@ def build_connection(env: str, environment: dict[str, object], credentials: dict
     return merged
 
 
-def execute_one(database: str, sql: str, connection: dict[str, object], timeout: float, retries: int) -> dict[str, object]:
+def build_query_settings(args: argparse.Namespace) -> dict[str, object]:
+    settings: dict[str, object] = {
+        "max_result_rows": 10000,
+        "result_overflow_mode": "throw",
+    }
+    if args.max_execution_time is not None:
+        settings.update(
+            {
+                "max_execution_time": args.max_execution_time,
+                "timeout_before_checking_execution_speed": 0,
+                "timeout_overflow_mode": "throw",
+            }
+        )
+    if args.max_memory_usage is not None:
+        settings["max_memory_usage"] = args.max_memory_usage
+    if args.max_bytes_to_read is not None:
+        settings["max_bytes_to_read"] = args.max_bytes_to_read
+    if args.max_rows_to_read is not None:
+        settings["max_rows_to_read"] = args.max_rows_to_read
+    if args.max_bytes_to_read is not None or args.max_rows_to_read is not None:
+        settings["read_overflow_mode"] = "throw"
+    return settings
+
+
+def execute_one(
+    database: str,
+    sql: str,
+    connection: dict[str, object],
+    timeout: float,
+    retries: int,
+    query_settings: dict[str, object],
+) -> dict[str, object]:
     validate_identifier(database, "database")
     scheme = "https" if connection.get("secure") else "http"
     params = {
         "database": database,
-        "max_result_rows": 10000,
-        "result_overflow_mode": "throw",
+        **query_settings,
     }
     url = f"{scheme}://{connection['host']}:{int(connection['port'])}/?{urllib.parse.urlencode(params)}"
     auth = base64.b64encode(f"{connection['user']}:{connection['password']}".encode()).decode()
@@ -300,7 +366,7 @@ def execute_one(database: str, sql: str, connection: dict[str, object], timeout:
     return {"ok": False, "database": database, "error": f"ClickHouse connection failed: {last_error}"}
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("sql", nargs="?", help="SQL containing {table} for the environment event table")
     parser.add_argument("--stdin", action="store_true", help="Read SQL from stdin")
@@ -317,8 +383,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timeout", type=float, default=64)
     parser.add_argument("--retries", type=int, default=3)
     parser.add_argument("--workers", type=int, default=4)
+    parser.add_argument("--max-execution-time", type=positive_float, help="Optional ClickHouse server execution limit in seconds")
+    parser.add_argument("--max-memory-usage", type=positive_int, help="Optional per-query, per-server memory limit in bytes")
+    parser.add_argument("--max-bytes-to-read", type=positive_int, help="Optional uncompressed bytes-read limit")
+    parser.add_argument("--max-rows-to-read", type=positive_int, help="Optional rows-read limit")
     parser.add_argument("--compact", action="store_true")
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def main() -> int:
@@ -329,6 +399,18 @@ def main() -> int:
         return 1
     if args.timeout <= 0 or args.retries < 0 or not 1 <= args.workers <= 8:
         print(json.dumps({"ok": False, "error": "timeout must be positive, retries non-negative, workers 1..8"}, ensure_ascii=False), file=sys.stderr)
+        return 1
+    if args.max_execution_time is not None and args.max_execution_time >= args.timeout:
+        print(
+            json.dumps(
+                {
+                    "ok": False,
+                    "error": "max-execution-time must be lower than the HTTP client timeout so ClickHouse can return a server-side timeout error",
+                },
+                ensure_ascii=False,
+            ),
+            file=sys.stderr,
+        )
         return 1
 
     env = args.env or "prod"
@@ -348,6 +430,7 @@ def main() -> int:
             args.allow_cross_event,
             args.allow_event_value,
         )
+        query_settings = build_query_settings(args)
         available_apps = fetch_apps()
         app_lookup = {app.casefold(): app for app in available_apps}
         if args.all_apps:
@@ -379,6 +462,7 @@ def main() -> int:
                 "port": int(environment["port"]),
                 "databases": databases,
                 "table": table,
+                "settings": query_settings,
                 "sql": validated_sql,
             }
             print(json.dumps(output, ensure_ascii=False, indent=None if args.compact else 2))
@@ -388,7 +472,15 @@ def main() -> int:
         connection = build_connection(env, environment, credentials)
         with concurrent.futures.ThreadPoolExecutor(max_workers=min(args.workers, len(databases))) as executor:
             future_by_database = {
-                executor.submit(execute_one, database, validated_sql, connection, args.timeout, args.retries): database
+                executor.submit(
+                    execute_one,
+                    database,
+                    validated_sql,
+                    connection,
+                    args.timeout,
+                    args.retries,
+                    query_settings,
+                ): database
                 for database in databases
             }
             by_database = {future_by_database[future]: future.result() for future in concurrent.futures.as_completed(future_by_database)}
@@ -401,6 +493,7 @@ def main() -> int:
             "port": int(connection["port"]),
             "databases": databases,
             "table": table,
+            "settings": query_settings,
             "results": results,
         }
         print(json.dumps(output, ensure_ascii=False, indent=None if args.compact else 2, default=str))
