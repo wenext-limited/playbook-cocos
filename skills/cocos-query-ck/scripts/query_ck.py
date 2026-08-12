@@ -15,6 +15,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 
 from resolve_scope import fetch_apps
@@ -38,6 +39,34 @@ ENVIRONMENTS = {
 IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 ALLOWED_START = re.compile(r"^\s*(?:SELECT\b|WITH\b[\s\S]*?\bSELECT\b|SHOW\b|DESC(?:RIBE)?\b|EXPLAIN\b|EXISTS\b)", re.I)
 FORBIDDEN = re.compile(r"\b(?:INSERT|ALTER|DROP|TRUNCATE|DELETE|UPDATE|OPTIMIZE|SYSTEM|KILL|CREATE|RENAME|ATTACH|DETACH|GRANT|REVOKE)\b", re.I)
+MAX_QUERY_WINDOW_DAYS = 30
+INTERVAL_SECONDS = {
+    "SECOND": 1,
+    "MINUTE": 60,
+    "HOUR": 60 * 60,
+    "DAY": 24 * 60 * 60,
+    "WEEK": 7 * 24 * 60 * 60,
+    # Calendar months/years vary. Use conservative maxima so they cannot
+    # silently pass a strict 30-day budget.
+    "MONTH": 31 * 24 * 60 * 60,
+    "YEAR": 366 * 24 * 60 * 60,
+}
+INTERVAL_UNIT_PATTERN = "SECOND|MINUTE|HOUR|DAY|WEEK|MONTH|YEAR"
+NOW_EXPRESSION_PATTERN = (
+    rf"now\s*\(\s*\)(?:\s*[+-]\s*INTERVAL\s+'?\d+(?:\.\d+)?'?\s+(?:{INTERVAL_UNIT_PATTERN})S?)?"
+)
+TIME_EXPRESSION_PATTERN = (
+    rf"(?:toStartOf(?:Day|Hour)\s*\(\s*{NOW_EXPRESSION_PATTERN}\s*\)"
+    rf"|{NOW_EXPRESSION_PATTERN}"
+    r"|toDateTime\s*\(\s*'[^']+'\s*\)"
+    r"|'[^']+')"
+)
+LOWER_BOUND = re.compile(rf"\bevent_time\b\s*(?:>=|>)\s*(?P<value>{TIME_EXPRESSION_PATTERN})", re.I)
+UPPER_BOUND = re.compile(rf"\bevent_time\b\s*(?:<=|<)\s*(?P<value>{TIME_EXPRESSION_PATTERN})", re.I)
+BETWEEN_BOUNDS = re.compile(
+    rf"\bevent_time\b\s+BETWEEN\s+(?P<lower>{TIME_EXPRESSION_PATTERN})\s+AND\s+(?P<upper>{TIME_EXPRESSION_PATTERN})",
+    re.I,
+)
 
 
 class QueryFailure(RuntimeError):
@@ -56,7 +85,96 @@ def validate_identifier(value: str, label: str) -> str:
     return value
 
 
-def validate_sql(sql: str, table: str, allow_cross_event: bool, allow_event_value: bool) -> str:
+def parse_time_expression(expression: str) -> tuple[str, float | datetime] | None:
+    value = expression.strip()
+    wrapper = re.fullmatch(r"toStartOf(Day|Hour)\s*\((.*)\)", value, re.I)
+    anchor = "now"
+    if wrapper:
+        anchor = f"start_of_{wrapper.group(1).lower()}"
+        value = wrapper.group(2).strip()
+
+    relative = re.fullmatch(
+        rf"now\s*\(\s*\)(?:\s*([+-])\s*INTERVAL\s+'?(\d+(?:\.\d+)?)'?\s+({INTERVAL_UNIT_PATTERN})S?)?",
+        value,
+        re.I,
+    )
+    if relative:
+        sign, amount, unit = relative.groups()
+        offset = 0.0
+        if amount and unit:
+            offset = float(amount) * INTERVAL_SECONDS[unit.upper()]
+            if sign == "-":
+                offset = -offset
+        return anchor, offset
+
+    absolute = re.fullmatch(r"(?:toDateTime\s*\(\s*)?'([^']+)'\s*\)?", value, re.I)
+    if not absolute:
+        return None
+    try:
+        parsed = datetime.fromisoformat(absolute.group(1).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return "absolute", parsed
+
+
+def validate_time_window(sql: str, allow_long_range: bool) -> None:
+    if allow_long_range:
+        return
+
+    lower_expressions = [match.group("value") for match in LOWER_BOUND.finditer(sql)]
+    upper_expressions = [match.group("value") for match in UPPER_BOUND.finditer(sql)]
+    for match in BETWEEN_BOUNDS.finditer(sql):
+        lower_expressions.append(match.group("lower"))
+        upper_expressions.append(match.group("upper"))
+
+    lower_bounds = [parse_time_expression(value) for value in lower_expressions]
+    upper_bounds = [parse_time_expression(value) for value in upper_expressions]
+    if not lower_bounds or not upper_bounds or any(bound is None for bound in lower_bounds + upper_bounds):
+        raise QueryFailure(
+            f"Cannot prove the event_time window is at most {MAX_QUERY_WINDOW_DAYS} days; "
+            "use now() - INTERVAL N DAY or ISO date literals, or add --allow-long-range for an explicitly approved wider window",
+            3,
+        )
+
+    parsed_lowers = [bound for bound in lower_bounds if bound is not None]
+    parsed_uppers = [bound for bound in upper_bounds if bound is not None]
+    anchors = {bound[0] for bound in parsed_lowers + parsed_uppers}
+    if len(anchors) != 1:
+        raise QueryFailure(
+            f"Cannot compare mixed event_time bound styles to enforce the {MAX_QUERY_WINDOW_DAYS}-day limit; "
+            "rewrite the bounds consistently or add --allow-long-range",
+            3,
+        )
+
+    anchor = anchors.pop()
+    if anchor == "absolute":
+        absolute_lowers = [bound[1] for bound in parsed_lowers]
+        absolute_uppers = [bound[1] for bound in parsed_uppers]
+        try:
+            span_seconds = (max(absolute_uppers) - min(absolute_lowers)).total_seconds()
+        except TypeError as error:
+            raise QueryFailure("event_time literals must use consistent timezone notation", 3) from error
+    else:
+        span_seconds = float(max(bound[1] for bound in parsed_uppers)) - float(min(bound[1] for bound in parsed_lowers))
+
+    if span_seconds < 0:
+        raise QueryFailure("event_time upper bound precedes the lower bound", 3)
+    if span_seconds > MAX_QUERY_WINDOW_DAYS * 24 * 60 * 60:
+        span_days = span_seconds / (24 * 60 * 60)
+        raise QueryFailure(
+            f"Event-table query window is {span_days:g} days; default maximum is {MAX_QUERY_WINDOW_DAYS} days. "
+            "Add --allow-long-range only when the wider range was explicitly requested or approved",
+            3,
+        )
+
+
+def validate_sql(
+    sql: str,
+    table: str,
+    allow_cross_event: bool,
+    allow_event_value: bool,
+    allow_long_range: bool,
+) -> str:
     normalized = strip_comments(sql)
     if not normalized:
         raise QueryFailure("SQL is empty", 1)
@@ -86,6 +204,7 @@ def validate_sql(sql: str, table: str, allow_cross_event: bool, allow_event_valu
         has_upper = re.search(r"\bevent_time\b\s*(?:<=|<|BETWEEN\b)", normalized, re.I)
         if not (has_lower and has_upper):
             raise QueryFailure("Event-table queries require both lower and upper event_time bounds", 3)
+        validate_time_window(normalized, allow_long_range)
         has_cocos_action = re.search(
             r"\b(?:PREWHERE|WHERE)\b(?:(?!\b(?:GROUP\s+BY|ORDER\s+BY|LIMIT|SETTINGS|FORMAT|UNION)\b)[\s\S])*?\baction\b\s*=\s*['\"]cocos_js['\"]",
             normalized,
@@ -198,6 +317,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", type=Path, default=Path.home() / ".wenext" / "clickhouse.json")
     parser.add_argument("--allow-cross-event", action="store_true")
     parser.add_argument("--allow-event-value", action="store_true", help="Allow explicit legacy/custom JSON fallback after top-level fields are ruled out")
+    parser.add_argument(
+        "--allow-long-range",
+        action="store_true",
+        help=f"Allow an explicitly approved event_time window over {MAX_QUERY_WINDOW_DAYS} days or one the validator cannot prove",
+    )
     parser.add_argument("--validate-only", action="store_true", help="Validate and print SQL without connecting")
     parser.add_argument("--timeout", type=float, default=64)
     parser.add_argument("--retries", type=int, default=3)
@@ -227,7 +351,13 @@ def main() -> int:
                 f"Table {table!r} does not match --env {env!r}; expected {expected_table!r}. Use {{table}} instead of crossing environments.",
                 3,
             )
-        validated_sql = validate_sql(sql, table, args.allow_cross_event, args.allow_event_value)
+        validated_sql = validate_sql(
+            sql,
+            table,
+            args.allow_cross_event,
+            args.allow_event_value,
+            args.allow_long_range,
+        )
         available_apps = fetch_apps()
         app_lookup = {app.casefold(): app for app in available_apps}
         if args.all_apps:
@@ -259,6 +389,7 @@ def main() -> int:
                 "port": int(environment["port"]),
                 "databases": databases,
                 "table": table,
+                "long_range_allowed": args.allow_long_range,
                 "sql": validated_sql,
             }
             print(json.dumps(output, ensure_ascii=False, indent=None if args.compact else 2))
