@@ -117,10 +117,7 @@ def parse_time_expression(expression: str) -> tuple[str, float | datetime] | Non
     return "absolute", parsed
 
 
-def validate_time_window(sql: str, allow_long_range: bool) -> None:
-    if allow_long_range:
-        return
-
+def validate_time_window(sql: str) -> None:
     lower_expressions = [match.group("value") for match in LOWER_BOUND.finditer(sql)]
     upper_expressions = [match.group("value") for match in UPPER_BOUND.finditer(sql)]
     for match in BETWEEN_BOUNDS.finditer(sql):
@@ -132,7 +129,7 @@ def validate_time_window(sql: str, allow_long_range: bool) -> None:
     if not lower_bounds or not upper_bounds or any(bound is None for bound in lower_bounds + upper_bounds):
         raise QueryFailure(
             f"Cannot prove the event_time window is at most {MAX_QUERY_WINDOW_DAYS} days; "
-            "use now() - INTERVAL N DAY or ISO date literals, or add --allow-long-range for an explicitly approved wider window",
+            "use now() - INTERVAL N DAY or ISO date literals; split longer ranges into consecutive queries",
             3,
         )
 
@@ -142,7 +139,7 @@ def validate_time_window(sql: str, allow_long_range: bool) -> None:
     if len(anchors) != 1:
         raise QueryFailure(
             f"Cannot compare mixed event_time bound styles to enforce the {MAX_QUERY_WINDOW_DAYS}-day limit; "
-            "rewrite the bounds consistently or add --allow-long-range",
+            "rewrite the bounds consistently and split longer ranges into consecutive queries",
             3,
         )
 
@@ -162,8 +159,8 @@ def validate_time_window(sql: str, allow_long_range: bool) -> None:
     if span_seconds > MAX_QUERY_WINDOW_DAYS * 24 * 60 * 60:
         span_days = span_seconds / (24 * 60 * 60)
         raise QueryFailure(
-            f"Event-table query window is {span_days:g} days; default maximum is {MAX_QUERY_WINDOW_DAYS} days. "
-            "Add --allow-long-range only when the wider range was explicitly requested or approved",
+            f"Event-table query window is {span_days:g} days; maximum per query is {MAX_QUERY_WINDOW_DAYS} days. "
+            "Split the requested range into consecutive, non-overlapping queries",
             3,
         )
 
@@ -173,7 +170,6 @@ def validate_sql(
     table: str,
     allow_cross_event: bool,
     allow_event_value: bool,
-    allow_long_range: bool,
 ) -> str:
     normalized = strip_comments(sql)
     if not normalized:
@@ -204,7 +200,7 @@ def validate_sql(
         has_upper = re.search(r"\bevent_time\b\s*(?:<=|<|BETWEEN\b)", normalized, re.I)
         if not (has_lower and has_upper):
             raise QueryFailure("Event-table queries require both lower and upper event_time bounds", 3)
-        validate_time_window(normalized, allow_long_range)
+        validate_time_window(normalized)
         has_cocos_action = re.search(
             r"\b(?:PREWHERE|WHERE)\b(?:(?!\b(?:GROUP\s+BY|ORDER\s+BY|LIMIT|SETTINGS|FORMAT|UNION)\b)[\s\S])*?\baction\b\s*=\s*['\"]cocos_js['\"]",
             normalized,
@@ -317,11 +313,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", type=Path, default=Path.home() / ".wenext" / "clickhouse.json")
     parser.add_argument("--allow-cross-event", action="store_true")
     parser.add_argument("--allow-event-value", action="store_true", help="Allow explicit legacy/custom JSON fallback after top-level fields are ruled out")
-    parser.add_argument(
-        "--allow-long-range",
-        action="store_true",
-        help=f"Allow an explicitly approved event_time window over {MAX_QUERY_WINDOW_DAYS} days or one the validator cannot prove",
-    )
     parser.add_argument("--validate-only", action="store_true", help="Validate and print SQL without connecting")
     parser.add_argument("--timeout", type=float, default=64)
     parser.add_argument("--retries", type=int, default=3)
@@ -356,7 +347,6 @@ def main() -> int:
             table,
             args.allow_cross_event,
             args.allow_event_value,
-            args.allow_long_range,
         )
         available_apps = fetch_apps()
         app_lookup = {app.casefold(): app for app in available_apps}
@@ -389,7 +379,6 @@ def main() -> int:
                 "port": int(environment["port"]),
                 "databases": databases,
                 "table": table,
-                "long_range_allowed": args.allow_long_range,
                 "sql": validated_sql,
             }
             print(json.dumps(output, ensure_ascii=False, indent=None if args.compact else 2))
