@@ -56,7 +56,7 @@ def validate_identifier(value: str, label: str) -> str:
     return value
 
 
-def validate_sql(sql: str, table: str, allow_cross_event: bool) -> str:
+def validate_sql(sql: str, table: str, allow_cross_event: bool, allow_event_value: bool) -> str:
     normalized = strip_comments(sql)
     if not normalized:
         raise QueryFailure("SQL is empty", 1)
@@ -66,6 +66,11 @@ def validate_sql(sql: str, table: str, allow_cross_event: bool) -> str:
         raise QueryFailure("Only read-only SELECT/SHOW/DESCRIBE/EXPLAIN/EXISTS queries are allowed", 3)
     if re.search(r"\bINTO\s+OUTFILE\b|\bFORMAT\s+[A-Za-z]", normalized, re.I):
         raise QueryFailure("INTO OUTFILE and caller-supplied FORMAT clauses are not allowed", 3)
+    if re.search(r"\bevent_value\b|\bJSONExtract\w*\s*\(", normalized, re.I) and not allow_event_value:
+        raise QueryFailure(
+            "event_value/JSONExtract fallback is disabled by default; use top-level typed columns, or add --allow-event-value after confirming fallback is necessary",
+            3,
+        )
 
     other_environment_tables = {str(config["table"]) for config in ENVIRONMENTS.values()} - {table}
     mismatched_tables = [name for name in other_environment_tables if re.search(rf"\b{re.escape(name)}\b", normalized, re.I)]
@@ -192,6 +197,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--table", help="Override the environment event table")
     parser.add_argument("--config", type=Path, default=Path.home() / ".wenext" / "clickhouse.json")
     parser.add_argument("--allow-cross-event", action="store_true")
+    parser.add_argument("--allow-event-value", action="store_true", help="Allow explicit legacy/custom JSON fallback after top-level fields are ruled out")
     parser.add_argument("--validate-only", action="store_true", help="Validate and print SQL without connecting")
     parser.add_argument("--timeout", type=float, default=64)
     parser.add_argument("--retries", type=int, default=3)
@@ -221,7 +227,7 @@ def main() -> int:
                 f"Table {table!r} does not match --env {env!r}; expected {expected_table!r}. Use {{table}} instead of crossing environments.",
                 3,
             )
-        validated_sql = validate_sql(sql, table, args.allow_cross_event)
+        validated_sql = validate_sql(sql, table, args.allow_cross_event, args.allow_event_value)
         available_apps = fetch_apps()
         app_lookup = {app.casefold(): app for app in available_apps}
         if args.all_apps:

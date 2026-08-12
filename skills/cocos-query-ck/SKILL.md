@@ -68,7 +68,15 @@ description: 查询和分析 WeNext Cocos Creator 游戏上报到 ClickHouse 的
 1. WSDK 内置事件：在 WSDK 的 `EventDefines.ts`、`ReportFunctions.ts` 和 `EventData.ts` 中确认 `event_id`、字段与类型。
 2. 游戏自定义事件：搜索游戏项目中 `ReportSystem.send(...)`、`reportSys.send(...)`、`stat(event_id, events)` 及目标 `event_id` 调用点。
 3. 不能从代码确定扩展字段含义时询问用户；不要根据 `str_key_N` / `long_key_N` 名称猜业务含义。
-4. 顶层类型化列优先；为兼容旧 WSDK 数据，仅在需要时回退 `event_value`。常用兼容表达式见 [references/query-cookbook.md](references/query-cookbook.md)。
+4. 默认只查询顶层类型化列。不要在首轮 SQL 中加入 `event_value`、`JSONExtract*` 或“顶层为空则解析 JSON”的兼容表达式。
+
+仅在以下任一条件成立时回退 `event_value`：
+
+- 代码或字段定义确认目标参数没有对应顶层列；
+- 用户明确要求覆盖旧 WSDK / 旧版本，且该窗口确有旧数据；
+- 顶层查询结果异常或为空，并通过小时间窗抽样确认值只存在于 `event_value`。
+
+回退时使用 `--allow-event-value` 单独执行有界查询，优先缩短时间窗并限定具体 `event_id`；不要把 JSON 回退永久合并进默认统计 SQL，也不要在顶层查询超时后自动改跑 JSON。模板见 [references/query-cookbook.md](references/query-cookbook.md)。
 
 ## 编写与执行查询
 
@@ -100,7 +108,7 @@ python3 <skill-dir>/scripts/query_ck.py --all-apps --allow-cross-event '<SQL>'
 1. database 来自已验证的 App，而不是 `app` 列；禁止 `WHERE app = ...`。
 2. `event_time` 同时有下界和上界；上界通常为 `<= now()`，用于排除客户端未来时间。
 3. 普通查询有具体 `event_id = ...` 或 `IN (...)`；跨事件查询满足专用保护条件。
-4. Cocos WSDK 事件限定 `action = 'cocos_js'`；游戏范围使用兼容的新旧 gameType 表达式。
+4. Cocos WSDK 事件限定 `action = 'cocos_js'`；游戏范围默认直接使用顶层 `long_key_1`，不要自动兼容旧 `event_value.gameType`。
 5. `event_id` 与 `action` 尽可能放在 `PREWHERE`；避免 `SELECT *`，明细必须有合理 `LIMIT`。
 6. 用户统计排除 `uid = 0`；金额、订单、动作等选择代表真实业务对象的去重键，不能默认用 `count()`。
 7. 不输出密码、token、完整 UID/device_id 列表或不必要的错误隐私数据。
