@@ -39,7 +39,7 @@ ENVIRONMENTS = {
 IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 ALLOWED_START = re.compile(r"^\s*(?:SELECT\b|WITH\b[\s\S]*?\bSELECT\b|SHOW\b|DESC(?:RIBE)?\b|EXPLAIN\b|EXISTS\b)", re.I)
 FORBIDDEN = re.compile(r"\b(?:INSERT|ALTER|DROP|TRUNCATE|DELETE|UPDATE|OPTIMIZE|SYSTEM|KILL|CREATE|RENAME|ATTACH|DETACH|GRANT|REVOKE)\b", re.I)
-MAX_QUERY_WINDOW_DAYS = 30
+MAX_QUERY_WINDOW_DAYS = 14
 INTERVAL_SECONDS = {
     "SECOND": 1,
     "MINUTE": 60,
@@ -47,7 +47,7 @@ INTERVAL_SECONDS = {
     "DAY": 24 * 60 * 60,
     "WEEK": 7 * 24 * 60 * 60,
     # Calendar months/years vary. Use conservative maxima so they cannot
-    # silently pass a strict 30-day budget.
+    # silently pass a strict 14-day budget.
     "MONTH": 31 * 24 * 60 * 60,
     "YEAR": 366 * 24 * 60 * 60,
 }

@@ -51,7 +51,7 @@ description: 查询和分析 WeNext Cocos Creator 游戏上报到 ClickHouse 的
 ### 时间与指标
 
 - 所有查询都必须有时间上下界。用户未给时间时：普通事件查询默认最近 24 小时并说明；**用户数、DAU/UV、留存或比率必须询问时间，不能套默认值**。
-- 事件表查询默认最多覆盖 30 天，脚本会硬校验。只有用户明确要求或确认更长时间范围时才添加 `--allow-long-range`；不要为绕过无法解析的时间表达式自动添加该参数，优先把边界改写成 `now() - INTERVAL N DAY` 或 ISO 日期字面量。
+- 事件表查询默认最多覆盖 14 天，脚本会硬校验。只有用户明确要求或确认更长时间范围时才添加 `--allow-long-range`；不要为绕过无法解析的时间表达式自动添加该参数，优先把边界改写成 `now() - INTERVAL N DAY` 或 ISO 日期字面量。
 - “统计某游戏用户数量”固定指：指定 App 与时间窗内，该游戏产生过任意 `action = 'cocos_js'` 上报的 `uniqExactIf(uid, uid != 0)`。只补问缺失的 App 和时间；不要再追问 event_id、去重字段或把最近 24 小时当默认值。用户明确要求设备数时才改用 `device_id`。
 - “JS 报错率”定义为：同 App、同游戏、同时间窗内，`js_error` 去重报错用户数 ÷ 任意 Cocos 上报去重用户数。分子和分母都排除 `uid = 0`，并展示两者样本数。
 - 其他含“率/占比/人均”的问题如果分母不唯一，先确认。
@@ -100,7 +100,7 @@ python3 <skill-dir>/scripts/query_ck.py --all-apps --allow-cross-event '<SQL>'
 
 查询用户数、错误率或事件发现等需要读取同游戏多个 `event_id` 的指标时，必须显式加 `--allow-cross-event`。它不是通用绕过开关；脚本仍要求有界时间、`action = 'cocos_js'` 和 gameType 过滤。
 
-超过 30 天的事件表查询只有在用户明确要求或确认后才执行，并显式放行：
+超过 14 天的事件表查询只有在用户明确要求或确认后才执行，并显式放行：
 
 ```bash
 python3 <skill-dir>/scripts/query_ck.py --env prod --database yoki --allow-long-range '<SQL>'
@@ -113,7 +113,7 @@ python3 <skill-dir>/scripts/query_ck.py --env prod --database yoki --allow-long-
 每次执行前确认：
 
 1. database 来自已验证的 App，而不是 `app` 列；禁止 `WHERE app = ...`。
-2. `event_time` 同时有下界和上界；上界通常为 `<= now()`，用于排除客户端未来时间。默认跨度不超过 30 天；更长窗口已获得用户明确要求或确认并添加 `--allow-long-range`。
+2. `event_time` 同时有下界和上界；上界通常为 `<= now()`，用于排除客户端未来时间。默认跨度不超过 14 天；更长窗口已获得用户明确要求或确认并添加 `--allow-long-range`。
 3. 普通查询有具体 `event_id = ...` 或 `IN (...)`；跨事件查询满足专用保护条件。
 4. Cocos WSDK 事件限定 `action = 'cocos_js'`；游戏范围默认直接使用顶层 `long_key_1`，不要自动兼容旧 `event_value.gameType`。
 5. `event_id` 与 `action` 尽可能放在 `PREWHERE`；避免 `SELECT *`，明细必须有合理 `LIMIT`。
@@ -133,4 +133,4 @@ python3 <skill-dir>/scripts/query_ck.py --env prod --database yoki --allow-long-
 
 ## 凭据与只读边界
 
-`query_ck.py` 优先读取环境专用的 `$CLICKHOUSE_PROD_PASSWORD` / `$CLICKHOUSE_TEST_PASSWORD`，再回退 `$CLICKHOUSE_PASSWORD`，最后读取 `~/.wenext/clickhouse.json`；Skill 内不保存凭据。配置文件必须为 `600`，生产与测试凭据不同时按 `prod` / `test` 分段，并可在各自分段内覆盖 host、port、user、secure。脚本强制只读、默认限制事件查询最多 30 天并限制最多返回 10,000 行；只允许 `SELECT`、`WITH ... SELECT`、`SHOW`、`DESCRIBE`、`EXPLAIN` 和 `EXISTS`，禁止任何写入或管理语句。
+`query_ck.py` 优先读取环境专用的 `$CLICKHOUSE_PROD_PASSWORD` / `$CLICKHOUSE_TEST_PASSWORD`，再回退 `$CLICKHOUSE_PASSWORD`，最后读取 `~/.wenext/clickhouse.json`；Skill 内不保存凭据。配置文件必须为 `600`，生产与测试凭据不同时按 `prod` / `test` 分段，并可在各自分段内覆盖 host、port、user、secure。脚本强制只读、默认限制事件查询最多 14 天并限制最多返回 10,000 行；只允许 `SELECT`、`WITH ... SELECT`、`SHOW`、`DESCRIBE`、`EXPLAIN` 和 `EXISTS`，禁止任何写入或管理语句。
