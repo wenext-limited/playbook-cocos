@@ -67,6 +67,14 @@ def validate_sql(sql: str, table: str, allow_cross_event: bool) -> str:
     if re.search(r"\bINTO\s+OUTFILE\b|\bFORMAT\s+[A-Za-z]", normalized, re.I):
         raise QueryFailure("INTO OUTFILE and caller-supplied FORMAT clauses are not allowed", 3)
 
+    other_environment_tables = {str(config["table"]) for config in ENVIRONMENTS.values()} - {table}
+    mismatched_tables = [name for name in other_environment_tables if re.search(rf"\b{re.escape(name)}\b", normalized, re.I)]
+    if mismatched_tables:
+        raise QueryFailure(
+            f"SQL references event table(s) from another environment: {mismatched_tables}; use {{table}} with the selected --env",
+            3,
+        )
+
     event_table_used = "{table}" in sql or re.search(rf"\b{re.escape(table)}\b", normalized, re.I)
     if event_table_used:
         has_lower = re.search(r"\bevent_time\b\s*(?:>=|>|BETWEEN\b)", normalized, re.I)
@@ -96,7 +104,7 @@ def validate_sql(sql: str, table: str, allow_cross_event: bool) -> str:
 
 
 def load_credentials(config_path: Path, env: str) -> dict[str, object]:
-    environment_password = os.environ.get("CLICKHOUSE_PASSWORD")
+    environment_password = os.environ.get(f"CLICKHOUSE_{env.upper()}_PASSWORD") or os.environ.get("CLICKHOUSE_PASSWORD")
     if environment_password:
         return {"password": environment_password}
 
@@ -117,25 +125,27 @@ def load_credentials(config_path: Path, env: str) -> dict[str, object]:
 
     password = config.get("password")
     if not password:
-        template = '{"password":"<read-only-password>"}'
+        template = '{"prod":{"password":"<prod-read-only-password>"},"test":{"password":"<test-read-only-password>"}}'
         raise QueryFailure(
-            f"Missing ClickHouse password. Set CLICKHOUSE_PASSWORD or create {config_path} with mode 600: {template}",
+            f"Missing ClickHouse password. Set CLICKHOUSE_{env.upper()}_PASSWORD / CLICKHOUSE_PASSWORD or create {config_path} with mode 600: {template}",
             2,
         )
     config["password"] = password
     return config
 
 
-def build_connection(environment: dict[str, object], credentials: dict[str, object]) -> dict[str, object]:
+def build_connection(env: str, environment: dict[str, object], credentials: dict[str, object]) -> dict[str, object]:
     merged = {**environment, **credentials}
-    overrides = {
-        "host": os.environ.get("CLICKHOUSE_HOST"),
-        "port": os.environ.get("CLICKHOUSE_PORT"),
-        "user": os.environ.get("CLICKHOUSE_USER"),
-    }
+    overrides = {}
+    for key in ("host", "port", "user"):
+        environment_key = f"CLICKHOUSE_{env.upper()}_{key.upper()}"
+        overrides[key] = os.environ.get(environment_key) or os.environ.get(f"CLICKHOUSE_{key.upper()}")
     for key, value in overrides.items():
         if value not in {None, ""}:
             merged[key] = int(value) if key == "port" else value
+    other_environment_hosts = {str(config["host"]) for name, config in ENVIRONMENTS.items() if name != env}
+    if str(merged["host"]) in other_environment_hosts:
+        raise QueryFailure(f"Configured host {merged['host']!r} belongs to another environment; refusing --env {env!r}", 3)
     return merged
 
 
@@ -144,7 +154,6 @@ def execute_one(database: str, sql: str, connection: dict[str, object], timeout:
     scheme = "https" if connection.get("secure") else "http"
     params = {
         "database": database,
-        "readonly": 1,
         "max_result_rows": 10000,
         "result_overflow_mode": "throw",
     }
@@ -175,7 +184,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("sql", nargs="?", help="SQL containing {table} for the environment event table")
     parser.add_argument("--stdin", action="store_true", help="Read SQL from stdin")
-    parser.add_argument("--env", choices=ENVIRONMENTS, default="prod")
+    parser.add_argument("--env", choices=ENVIRONMENTS, help="Query environment; defaults to prod when omitted")
     scope = parser.add_mutually_exclusive_group()
     scope.add_argument("--database")
     scope.add_argument("--databases", help="Comma-separated validated App/database names")
@@ -201,9 +210,17 @@ def main() -> int:
         print(json.dumps({"ok": False, "error": "timeout must be positive, retries non-negative, workers 1..8"}, ensure_ascii=False), file=sys.stderr)
         return 1
 
-    environment = ENVIRONMENTS[args.env]
+    env = args.env or "prod"
+    environment_defaulted = args.env is None
+    environment = ENVIRONMENTS[env]
     try:
-        table = validate_identifier(args.table or str(environment["table"]), "table")
+        expected_table = str(environment["table"])
+        table = validate_identifier(args.table or expected_table, "table")
+        if table != expected_table:
+            raise QueryFailure(
+                f"Table {table!r} does not match --env {env!r}; expected {expected_table!r}. Use {{table}} instead of crossing environments.",
+                3,
+            )
         validated_sql = validate_sql(sql, table, args.allow_cross_event)
         available_apps = fetch_apps()
         app_lookup = {app.casefold(): app for app in available_apps}
@@ -227,12 +244,22 @@ def main() -> int:
         databases = list(dict.fromkeys(databases))
 
         if args.validate_only:
-            output = {"ok": True, "validated": True, "environment": args.env, "databases": databases, "sql": validated_sql}
+            output = {
+                "ok": True,
+                "validated": True,
+                "environment": env,
+                "environment_defaulted": environment_defaulted,
+                "host": str(environment["host"]),
+                "port": int(environment["port"]),
+                "databases": databases,
+                "table": table,
+                "sql": validated_sql,
+            }
             print(json.dumps(output, ensure_ascii=False, indent=None if args.compact else 2))
             return 0
 
-        credentials = load_credentials(args.config, args.env)
-        connection = build_connection(environment, credentials)
+        credentials = load_credentials(args.config, env)
+        connection = build_connection(env, environment, credentials)
         with concurrent.futures.ThreadPoolExecutor(max_workers=min(args.workers, len(databases))) as executor:
             future_by_database = {
                 executor.submit(execute_one, database, validated_sql, connection, args.timeout, args.retries): database
@@ -240,7 +267,16 @@ def main() -> int:
             }
             by_database = {future_by_database[future]: future.result() for future in concurrent.futures.as_completed(future_by_database)}
         results = [by_database[database] for database in databases]
-        output = {"ok": all(item["ok"] for item in results), "environment": args.env, "results": results}
+        output = {
+            "ok": all(item["ok"] for item in results),
+            "environment": env,
+            "environment_defaulted": environment_defaulted,
+            "host": str(connection["host"]),
+            "port": int(connection["port"]),
+            "databases": databases,
+            "table": table,
+            "results": results,
+        }
         print(json.dumps(output, ensure_ascii=False, indent=None if args.compact else 2, default=str))
         return 0 if output["ok"] else 3
     except QueryFailure as error:

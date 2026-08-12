@@ -1,4 +1,4 @@
 interface:
-  display_name: "Cocos CK 埋点查询"
-  short_description: "安全查询并分析 Cocos 游戏 ClickHouse 埋点数据"
-  default_prompt: "使用 $cocos-query-ck 查询指定 App 和游戏的 Cocos 埋点并解释统计口径。"
+  display_name: "Cocos CK 上报查询"
+  short_description: "分环境安全查询 Cocos 游戏 ClickHouse 上报数据"
+  default_prompt: "使用 $cocos-query-ck 在指定环境查询 App 和游戏的 Cocos 上报，并说明实际主机、数据库、表与统计口径。"

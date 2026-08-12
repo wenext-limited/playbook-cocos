@@ -2,9 +2,19 @@
 
 ## 表结构与生命周期
 
-每个 App 对应一个 database，正式事件表为 `event_local_prod`，测试事件表为 `event_local_test`。产品范围由 database 决定，不使用 `app` 列过滤。
+每个 App 对应一个 database。产品范围由 database 决定，不使用 `app` 列过滤。
 
-已知正式表结构：
+| 环境 | 主机 | 默认用户 | 事件表 |
+|---|---|---|---|
+| 生产 `prod` | `cc-t4nnjid28p401lh59-ck-l8.clickhouseserver.singapore.rds.aliyuncs.com` | `clickhouse_read` | `event_local_prod` |
+| 测试 `test` | `43.156.112.94` | `read_only` | `event_local_test` |
+
+- 未指定环境时默认生产，但必须在结果中声明采用了默认生产环境。
+- 一次查询只连接一个环境。需要对比时分别查询、分别呈现，禁止把生产和测试数据相加或混算。
+- 始终通过 `{table}` 选择事件表。环境、实际主机与表名必须一起输出；配置覆盖连接信息时，以脚本返回的实际主机为准。
+- 生产失败不得改查测试，测试失败也不得改查生产。
+
+已知生产表结构：
 
 ```text
 PARTITION BY toYYYYMMDD(event_time)
