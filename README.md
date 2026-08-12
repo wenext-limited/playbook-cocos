@@ -79,7 +79,6 @@ playbook-cocos/
 | `cocos-localization` | 多语言本地化工作流 |
 | `cocos-coin-animation` | 贝塞尔曲线飞币动画、多方向路径、对象池 |
 | `cocos-data-persistence` | 三层存储架构、前缀隔离、内存缓存 |
-| `cocos-query-ck` | 查询和分析单个或全部 App 的 Cocos ClickHouse 埋点、用户数、趋势与比率 |
 | `cocos-playbook-sync` | 同步本地 `playbook-cocos`；无修改时仅更新，有修改时让用户选择丢弃或提交 PR |
 | `cocos-playbook-adapter` | 在 Claude CLI、Codex / Codex CLI、Cursor、Windsurf、Cline / Roo Code 等 AI 工具本地目录下用软链接引用 `~/.playbook-cocos` |
 

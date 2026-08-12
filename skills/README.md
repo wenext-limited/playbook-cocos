@@ -41,9 +41,6 @@
 - `cocos-data-persistence/`
   实现数据持久化时使用。包括三层存储架构、前缀隔离、内存缓存策略。
 
-- `cocos-query-ck/`
-  查询和分析 Cocos 游戏上报到 ClickHouse 的任意埋点。支持单个或全部 App、gameType、用户数、趋势、比率与安全 SQL；JS 错误排行和根因诊断转交对应专项技能。
-
 - `cocos-playbook-sync/`
   同步本地 `playbook-cocos` 仓库与 GitHub 远程时使用。无本地修改时只做快进更新；有本地修改时列出变更，让用户选择丢弃后更新，或进入 PR 提交流程上传改动。
 
