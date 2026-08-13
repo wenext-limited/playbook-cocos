@@ -1,0 +1,7 @@
+interface:
+  display_name: "查询线上游戏配置"
+  short_description: "按 APP 和游戏查询线上配置并直接返回 JSON"
+  default_prompt: "使用 $cocos-query-config 查询指定 APP 和游戏的线上配置，直接返回解析后的 JSON。"
+
+policy:
+  allow_implicit_invocation: true
