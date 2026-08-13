@@ -45,6 +45,8 @@ PROTECTED_QUERY_SETTINGS = re.compile(
     re.I,
 )
 MAX_QUERY_WINDOW_DAYS = 14
+MAX_EXECUTION_TIME_SECONDS = 60.0
+MAX_MEMORY_USAGE_BYTES = 2 * 1024 * 1024 * 1024
 INTERVAL_SECONDS = {
     "SECOND": 1,
     "MINUTE": 60,
@@ -107,6 +109,20 @@ def positive_float(value: str) -> float:
         raise argparse.ArgumentTypeError("must be a number") from error
     if not math.isfinite(parsed) or parsed <= 0:
         raise argparse.ArgumentTypeError("must be a finite number greater than zero")
+    return parsed
+
+
+def bounded_execution_time(value: str) -> float:
+    parsed = positive_float(value)
+    if parsed > MAX_EXECUTION_TIME_SECONDS:
+        raise argparse.ArgumentTypeError(f"must be at most {MAX_EXECUTION_TIME_SECONDS:g} seconds")
+    return parsed
+
+
+def bounded_memory_usage(value: str) -> int:
+    parsed = positive_int(value)
+    if parsed > MAX_MEMORY_USAGE_BYTES:
+        raise argparse.ArgumentTypeError(f"must be at most {MAX_MEMORY_USAGE_BYTES} bytes (2 GiB)")
     return parsed
 
 
@@ -383,8 +399,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--timeout", type=float, default=64)
     parser.add_argument("--retries", type=int, default=3)
     parser.add_argument("--workers", type=int, default=4)
-    parser.add_argument("--max-execution-time", type=positive_float, help="Optional ClickHouse server execution limit in seconds")
-    parser.add_argument("--max-memory-usage", type=positive_int, help="Optional per-query, per-server memory limit in bytes")
+    parser.add_argument(
+        "--max-execution-time",
+        type=bounded_execution_time,
+        help=f"Optional ClickHouse server execution limit in seconds (max {MAX_EXECUTION_TIME_SECONDS:g})",
+    )
+    parser.add_argument(
+        "--max-memory-usage",
+        type=bounded_memory_usage,
+        help=f"Optional per-query, per-server memory limit in bytes (max {MAX_MEMORY_USAGE_BYTES}, 2 GiB)",
+    )
     parser.add_argument("--max-bytes-to-read", type=positive_int, help="Optional uncompressed bytes-read limit")
     parser.add_argument("--max-rows-to-read", type=positive_int, help="Optional rows-read limit")
     parser.add_argument("--compact", action="store_true")

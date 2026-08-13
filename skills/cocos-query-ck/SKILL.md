@@ -104,12 +104,12 @@ python3 <skill-dir>/scripts/query_ck.py --all-apps --allow-cross-event '<SQL>'
 
 | CLI 参数 | ClickHouse setting | 单位与行为 |
 |---|---|---|
-| `--max-execution-time <秒>` | `max_execution_time` | 正数秒；自动附带 `timeout_before_checking_execution_speed=0` 和 `timeout_overflow_mode=throw` |
-| `--max-memory-usage <字节>` | `max_memory_usage` | 正整数；限制单条查询在单台服务器的内存 |
+| `--max-execution-time <秒>` | `max_execution_time` | `0 < 值 ≤ 60`；自动附带 `timeout_before_checking_execution_speed=0` 和 `timeout_overflow_mode=throw` |
+| `--max-memory-usage <字节>` | `max_memory_usage` | `0 < 值 ≤ 2147483648`（2 GiB）；限制单条查询在单台服务器的内存 |
 | `--max-bytes-to-read <字节>` | `max_bytes_to_read` | 正整数；自动附带 `read_overflow_mode=throw` |
 | `--max-rows-to-read <行数>` | `max_rows_to_read` | 正整数；自动附带 `read_overflow_mode=throw` |
 
-所有资源上限通过 HTTP 查询参数传递，禁止在 SQL `SETTINGS` 中设置或覆盖。`throw` 模式固定不可选，确保超限时报错而不是返回不完整结果。`--max-execution-time` 必须小于客户端 `--timeout`；例如服务端 50 秒、客户端默认 64 秒：
+所有资源上限通过 HTTP 查询参数传递，禁止在 SQL `SETTINGS` 中设置或覆盖。`throw` 模式固定不可选，确保超限时报错而不是返回不完整结果。脚本硬限制 `--max-execution-time` 最高 60 秒、`--max-memory-usage` 最高 2 GiB，用户不得提高或绕过；`--max-execution-time` 还必须小于客户端 `--timeout`。例如服务端 50 秒、客户端默认 64 秒：
 
 ```bash
 python3 <skill-dir>/scripts/query_ck.py --env prod --database yoki \
@@ -164,4 +164,4 @@ python3 <skill-dir>/scripts/query_ck.py --env prod --database yoki \
 
 ## 凭据与只读边界
 
-`query_ck.py` 优先读取环境专用的 `$CLICKHOUSE_PROD_PASSWORD` / `$CLICKHOUSE_TEST_PASSWORD`，再回退 `$CLICKHOUSE_PASSWORD`，最后读取 `~/.wenext/clickhouse.json`；Skill 内不保存凭据。配置文件必须为 `600`，生产与测试凭据不同时按 `prod` / `test` 分段，并可在各自分段内覆盖 host、port、user、secure。脚本强制只读、硬限制单次事件查询最多 14 天且没有长时间绕过开关，并限制最多返回 10,000 行；用户可通过受校验的 CLI 参数额外限制服务端执行时间、单查询内存、扫描字节和扫描行数。只允许 `SELECT`、`WITH ... SELECT`、`SHOW`、`DESCRIBE`、`EXPLAIN` 和 `EXISTS`，禁止任何写入或管理语句。
+`query_ck.py` 优先读取环境专用的 `$CLICKHOUSE_PROD_PASSWORD` / `$CLICKHOUSE_TEST_PASSWORD`，再回退 `$CLICKHOUSE_PASSWORD`，最后读取 `~/.wenext/clickhouse.json`；Skill 内不保存凭据。配置文件必须为 `600`，生产与测试凭据不同时按 `prod` / `test` 分段，并可在各自分段内覆盖 host、port、user、secure。脚本强制只读、硬限制单次事件查询最多 14 天且没有长时间绕过开关，并限制最多返回 10,000 行；用户可通过受校验的 CLI 参数额外限制服务端执行时间、单查询内存、扫描字节和扫描行数，其中执行时间最高 60 秒、单查询单服务器内存最高 2 GiB。只允许 `SELECT`、`WITH ... SELECT`、`SHOW`、`DESCRIBE`、`EXPLAIN` 和 `EXISTS`，禁止任何写入或管理语句。
