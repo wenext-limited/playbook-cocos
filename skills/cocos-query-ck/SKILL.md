@@ -164,4 +164,4 @@ python3 <skill-dir>/scripts/query_ck.py --env prod --database yoki \
 
 ## 凭据与只读边界
 
-`query_ck.py` 优先读取环境专用的 `$CLICKHOUSE_PROD_PASSWORD` / `$CLICKHOUSE_TEST_PASSWORD`，再回退 `$CLICKHOUSE_PASSWORD`，最后读取 `~/.wenext/clickhouse.json`；Skill 内不保存凭据。配置文件必须为 `600`，生产与测试凭据不同时按 `prod` / `test` 分段，并可在各自分段内覆盖 host、port、user、secure。脚本强制只读、硬限制单次事件查询最多 14 天且没有长时间绕过开关，并限制最多返回 10,000 行；用户可通过受校验的 CLI 参数额外限制服务端执行时间、单查询内存、扫描字节和扫描行数，其中执行时间最高 60 秒、单查询单服务器内存最高 2 GiB。只允许 `SELECT`、`WITH ... SELECT`、`SHOW`、`DESCRIBE`、`EXPLAIN` 和 `EXISTS`，禁止任何写入或管理语句。
+`query_ck.py` 内置生产与测试环境的只读账号和密码；如设置 `$CLICKHOUSE_PROD_PASSWORD` / `$CLICKHOUSE_TEST_PASSWORD`，再回退 `$CLICKHOUSE_PASSWORD`，环境变量优先覆盖内置密码。也可用权限为 `600` 的 `~/.wenext/clickhouse.json` 覆盖对应环境的 host、port、user、password、secure。不要在输出、日志、SQL 或提交信息中打印密码。脚本强制只读、硬限制单次事件查询最多 14 天且没有长时间绕过开关，并限制最多返回 10,000 行；用户可通过受校验的 CLI 参数额外限制服务端执行时间、单查询内存、扫描字节和扫描行数，其中执行时间最高 60 秒、单查询单服务器内存最高 2 GiB。只允许 `SELECT`、`WITH ... SELECT`、`SHOW`、`DESCRIBE`、`EXPLAIN` 和 `EXISTS`，禁止任何写入或管理语句。

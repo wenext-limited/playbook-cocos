@@ -26,6 +26,7 @@ ENVIRONMENTS = {
         "host": "cc-t4nnjid28p401lh59-ck-l8.clickhouseserver.singapore.rds.aliyuncs.com",
         "port": 8123,
         "user": "clickhouse_read",
+        "password": "!NQ%mifU%U%oh48wD&U3",
         "table": "event_local_prod",
         "secure": False,
     },
@@ -33,6 +34,7 @@ ENVIRONMENTS = {
         "host": "43.156.112.94",
         "port": 8123,
         "user": "read_only",
+        "password": "7j3kMpDFPIMdXc%d",
         "table": "event_local_test",
         "secure": False,
     },
@@ -295,7 +297,7 @@ def load_credentials(config_path: Path, env: str) -> dict[str, object]:
             raise QueryFailure(f"Credential config section {env!r} must be an object", 2)
         config.update(selected)
 
-    password = config.get("password")
+    password = config.get("password") or ENVIRONMENTS[env].get("password")
     if not password:
         template = '{"prod":{"password":"<prod-read-only-password>"},"test":{"password":"<test-read-only-password>"}}'
         raise QueryFailure(
