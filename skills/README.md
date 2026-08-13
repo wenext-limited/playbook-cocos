@@ -8,6 +8,9 @@
 
 以 `cocos-` 为前缀的技能聚焦 Cocos Creator 引擎通用能力。
 
+- `cocos-query-config/`
+  按 APP 和游戏查询 Wiki 配置表中的 `operationConfigReadUrl` 与 `gameConfigId`，读取线上运营配置并生成 HTML 格式化 JSON 报告。
+
 - `cocos-project-setup/`
   新建 Cocos Creator 游戏项目时使用。推荐从 `skills/cocos-project-setup/new_project_code/` 模板拷贝基础代码快速搭建，也支持手动创建。包括脚手架搭建、初始化配置、入口类编写、插件安装、子游戏模板定制。
 
