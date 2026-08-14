@@ -31,7 +31,7 @@ TTL event_time + 180 DAY
 | `event_time` | `Date.now()` | 客户端事件时间；必须限制上下界 |
 | `event_id` | `ReportSystem.send` 参数 | 事件类型 |
 | `action` | WSDK `emEventAction` | 当前内置 Cocos 事件为 `cocos_js` |
-| `event_value` | `JSON.stringify(reportValue)` | 原始业务参数 JSON；默认不读取，仅作受控回退 |
+| `event_value` | `JSON.stringify(reportValue)` | 原始业务参数 JSON；gameType 用于默认新旧兼容，其他字段仅作受控回退 |
 | `uid` | 原生初始化信息 | 用户 ID；`0` 代表不能作为已登录用户统计 |
 | `device_id` | 原生初始化信息 | 设备标识，仅在用户明确需要设备口径时使用 |
 | `platform` | 原生初始化信息 | 宿主平台 |
@@ -43,11 +43,9 @@ TTL event_time + 180 DAY
 
 `app` 列在历史全端数据中不可靠。禁止用它限定产品；database 才是产品边界。
 
-## 顶层字段优先策略
+## gameType 新旧统一策略
 
-默认直接用顶层字段查询：gameType 使用 `long_key_1`，JS 错误使用 `message`，其他字段采用下方类型化列。不要为了“可能存在旧数据”就在首轮 SQL 中加入 `JSONExtract*`；解析 `event_value` 会显著放大扫描成本。
-
-只有代码或小窗口抽样证明目标值仅存在于 JSON，或用户明确要求覆盖旧 WSDK 时，才单独执行带 `--allow-event-value` 的受限回退查询。例如旧 gameType：
+gameType 是所有游戏查询的范围条件，必须同时覆盖新旧格式。使用下列表达式生成统一 `game_type`：顶层 `long_key_1` 有效时直接采用；仅当该行顶层值缺失或为 `0` 时解析 `event_value.gameType`。
 
 ```sql
 if(
@@ -57,7 +55,15 @@ if(
 ) AS game_type
 ```
 
-不要把该表达式合并进默认模板。先返回顶层字段结果，并在确实执行旧字段补查时分别说明覆盖范围、耗时和是否合并结果。
+按 `game_type = <目标>` 过滤后，在同一次查询中统一执行 `uniqExact`、比率或其他聚合。不要分别统计新版与旧版用户数再相加；同一用户可能同时命中两种格式。运行时显式添加 `--allow-event-value`，并设置 `short_circuit_function_evaluation = 'force_enable'`，避免在顶层 gameType 有效的行上执行 JSON 分支。
+
+解析旧 gameType 会增加扫描成本。保持时间有界，尽量将具体 `event_id` 与 `action` 放入 `PREWHERE`；跨事件用户数等指标无法限定 `event_id` 时，仍使用统一表达式并报告扫描量。
+
+## 其他字段顶层优先策略
+
+JS 错误优先使用 `message`，其他业务字段采用下方类型化列。不要为了“可能存在旧数据”就在首轮 SQL 中为这些字段加入 `JSONExtract*`；解析 `event_value` 会显著放大扫描成本。
+
+只有代码或小窗口抽样证明目标值仅存在于 JSON，或用户明确要求覆盖旧 WSDK 时，才对 gameType 以外的字段单独执行带 `--allow-event-value` 的受限回退查询。顶层为空时先检查调用点、字段类型和版本范围；不要直接触发全窗口 JSON 回退。
 
 ## 顶层类型化扩展字段
 
@@ -70,7 +76,7 @@ if(
 | Int64 | `duration`, `code`, `long_key_1` … `long_key_10` |
 | Float64 | `double_key_1` … `double_key_10` |
 
-WSDK 只把白名单内且类型合法的值提升到顶层列。顶层为空时先检查调用点、字段类型和版本范围；不要直接触发全窗口 JSON 回退。
+WSDK 只把白名单内且类型合法的值提升到顶层列。
 
 扩展槽含义由具体事件决定。例如 `str_key_3` 在 WSDK `game_flow` 中是 flow，但在自定义事件中可能完全不同。禁止跨事件复用其业务含义。
 

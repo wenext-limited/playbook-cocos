@@ -52,7 +52,7 @@ description: 查询和分析 WeNext Cocos Creator 游戏上报到 ClickHouse 的
 
 - 所有查询都必须有时间上下界。用户未给时间时：普通事件查询默认最近 24 小时并说明；**用户数、DAU/UV、留存或比率必须询问时间，不能套默认值**。
 - 单次事件表查询最多覆盖 14 天，脚本会硬校验且没有绕过开关。总时间范围超过 14 天时，先固定同一个开始与结束时刻，再拆成多个连续、无重叠且每段不超过 14 天的半开区间 `[start, end)`，按时间顺序逐段执行；不要并发执行多个时间段，也不要让每段分别计算 `now()`，以免边界漂移、遗漏或重复。
-- “统计某游戏用户数量”固定指：指定 App 与时间窗内，该游戏产生过任意 `action = 'cocos_js'` 上报的 `uniqExactIf(uid, uid != 0)`。只补问缺失的 App 和时间；不要再追问 event_id、去重字段或把最近 24 小时当默认值。用户明确要求设备数时才改用 `device_id`。
+- “统计某游戏用户数量”固定指：指定 App 与时间窗内，该游戏产生过任意 `action = 'cocos_js'` 上报的 `uniqExactIf(uid, uid != 0)`。游戏范围必须用统一 `game_type` 同时覆盖顶层 `long_key_1` 与旧版 `event_value.gameType`，并在同一次聚合中去重；不要分别统计后相加。只补问缺失的 App 和时间；不要再追问 event_id、去重字段或把最近 24 小时当默认值。用户明确要求设备数时才改用 `device_id`。
 - “JS 报错率”定义为：同 App、同游戏、同时间窗内，`js_error` 去重报错用户数 ÷ 任意 Cocos 上报去重用户数。分子和分母都排除 `uid = 0`，并展示两者样本数。
 - 其他含“率/占比/人均”的问题如果分母不唯一，先确认。
 
@@ -69,15 +69,30 @@ description: 查询和分析 WeNext Cocos Creator 游戏上报到 ClickHouse 的
 1. WSDK 内置事件：在 WSDK 的 `EventDefines.ts`、`ReportFunctions.ts` 和 `EventData.ts` 中确认 `event_id`、字段与类型。
 2. 游戏自定义事件：搜索游戏项目中 `ReportSystem.send(...)`、`reportSys.send(...)`、`stat(event_id, events)` 及目标 `event_id` 调用点。
 3. 不能从代码确定扩展字段含义时询问用户；不要根据 `str_key_N` / `long_key_N` 名称猜业务含义。
-4. 默认只查询顶层类型化列。不要在首轮 SQL 中加入 `event_value`、`JSONExtract*` 或“顶层为空则解析 JSON”的兼容表达式。
+4. gameType 是游戏范围字段，属于默认兼容例外：所有按游戏过滤的查询都使用统一 `game_type`，先取有效的顶层 `long_key_1`，仅当该行顶层值缺失或为 `0` 时读取 `event_value.gameType`。必须使用 `--allow-event-value`，并在 SQL 中设置 `short_circuit_function_evaluation = 'force_enable'`。
+5. 除 gameType 外，默认只查询顶层类型化列。不要在首轮 SQL 中为其他字段加入 `event_value`、`JSONExtract*` 或“顶层为空则解析 JSON”的兼容表达式。
 
-仅在以下任一条件成立时回退 `event_value`：
+统一 gameType 表达式固定为：
+
+```sql
+if(
+  ifNull(long_key_1, 0) > 0,
+  ifNull(long_key_1, 0),
+  toInt64(JSONExtractUInt(event_value, 'gameType'))
+) AS game_type
+```
+
+- 新旧数据必须放在同一条查询中按 `game_type = <目标>` 过滤，再统一执行 `uniqExact`、比率或其他聚合。
+- 不要先查 `long_key_1` 再补查 JSON，也不要相加新旧去重用户数；同一 UID 可能同时出现在两种格式中。
+- 可同时返回 `countIf(ifNull(long_key_1, 0) > 0)` 与 `countIf(ifNull(long_key_1, 0) <= 0)`，让用户核验新版、旧版命中行数。
+
+除 gameType 外，仅在以下任一条件成立时回退 `event_value`：
 
 - 代码或字段定义确认目标参数没有对应顶层列；
 - 用户明确要求覆盖旧 WSDK / 旧版本，且该窗口确有旧数据；
 - 顶层查询结果异常或为空，并通过小时间窗抽样确认值只存在于 `event_value`。
 
-回退时使用 `--allow-event-value` 单独执行有界查询，优先缩短时间窗并限定具体 `event_id`；不要把 JSON 回退永久合并进默认统计 SQL，也不要在顶层查询超时后自动改跑 JSON。模板见 [references/query-cookbook.md](references/query-cookbook.md)。
+其他字段回退时使用 `--allow-event-value` 单独执行有界查询，优先缩短时间窗并限定具体 `event_id`；不要把其他 JSON 回退永久合并进默认统计 SQL，也不要在顶层查询超时后自动改跑 JSON。模板见 [references/query-cookbook.md](references/query-cookbook.md)。
 
 ## 编写与执行查询
 
@@ -86,8 +101,8 @@ description: 查询和分析 WeNext Cocos Creator 游戏上报到 ClickHouse 的
 普通生产单事件查询：
 
 ```bash
-python3 <skill-dir>/scripts/query_ck.py --env prod --database yoki \
-  "SELECT count() AS events FROM {table} PREWHERE event_id = 'game_flow' AND action = 'cocos_js' WHERE event_time >= now() - INTERVAL 1 DAY AND event_time <= now() AND long_key_1 = 1"
+python3 <skill-dir>/scripts/query_ck.py --env prod --database yoki --allow-event-value \
+  "WITH if(ifNull(long_key_1, 0) > 0, ifNull(long_key_1, 0), toInt64(JSONExtractUInt(event_value, 'gameType'))) AS game_type SELECT count() AS events FROM {table} PREWHERE event_id = 'game_flow' AND action = 'cocos_js' WHERE event_time >= now() - INTERVAL 1 DAY AND event_time <= now() AND game_type = 1 SETTINGS short_circuit_function_evaluation = 'force_enable'"
 ```
 
 查询测试环境时仅把环境参数改为 `--env test`，不要改 SQL 中的 `{table}`。
@@ -95,10 +110,10 @@ python3 <skill-dir>/scripts/query_ck.py --env prod --database yoki \
 跨 App 时先解析 App 列表，再一次执行同一条 SQL：
 
 ```bash
-python3 <skill-dir>/scripts/query_ck.py --all-apps --allow-cross-event '<SQL>'
+python3 <skill-dir>/scripts/query_ck.py --all-apps --allow-cross-event --allow-event-value '<SQL>'
 ```
 
-查询用户数、错误率或事件发现等需要读取同游戏多个 `event_id` 的指标时，必须显式加 `--allow-cross-event`。它不是通用绕过开关；脚本仍要求有界时间、`action = 'cocos_js'` 和 gameType 过滤。
+按游戏查询时必须显式加 `--allow-event-value` 以执行统一 gameType 表达式。查询用户数、错误率或事件发现等需要读取同游戏多个 `event_id` 的指标时，还必须显式加 `--allow-cross-event`。它们不是通用绕过开关；脚本仍要求有界时间、`action = 'cocos_js'` 和 gameType 过滤。
 
 用户明确指定查询资源上限时，按需添加以下额外参数；未指定时不要猜值或自动添加：
 
@@ -146,7 +161,7 @@ python3 <skill-dir>/scripts/query_ck.py --env prod --database yoki \
 1. database 来自已验证的 App，而不是 `app` 列；禁止 `WHERE app = ...`。
 2. `event_time` 同时有下界和上界；上界用于排除客户端未来时间。单次跨度不超过 14 天；更长范围已按固定边界拆成连续、无重叠的半开区间并依次查询。
 3. 普通查询有具体 `event_id = ...` 或 `IN (...)`；跨事件查询满足专用保护条件。
-4. Cocos WSDK 事件限定 `action = 'cocos_js'`；游戏范围默认直接使用顶层 `long_key_1`，不要自动兼容旧 `event_value.gameType`。
+4. Cocos WSDK 事件限定 `action = 'cocos_js'`；游戏范围使用统一 `game_type`，顶层 `long_key_1` 有效时优先采用，否则读取旧版 `event_value.gameType`。命令包含 `--allow-event-value`，SQL 强制启用短路计算。
 5. `event_id` 与 `action` 尽可能放在 `PREWHERE`；避免 `SELECT *`，明细必须有合理 `LIMIT`。
 6. 用户统计排除 `uid = 0`；金额、订单、动作等选择代表真实业务对象的去重键，不能默认用 `count()`。
 7. 不输出密码、token、完整 UID/device_id 列表或不必要的错误隐私数据。
@@ -156,6 +171,7 @@ python3 <skill-dir>/scripts/query_ck.py --env prod --database yoki \
 先给结论和小表格，再报告：环境、实际主机、App/database、实际表名、游戏/gameType、时间范围、事件/action、过滤条件、聚合函数以及分子/分母。不要只写“CK”或只写 `prod/test`，要让用户能直接核验数据来源。
 
 - 跨 App 查询逐个显示成功、空结果与失败；不要把失败 App 当作 0。
+- 按游戏查询时同时说明统一 gameType 口径；若返回了新版与旧版命中行数，分别展示，但最终用户数、比率和其他去重指标只能使用统一聚合结果。
 - 同时查询生产和测试时分别给出两组来源信息与结果，禁止给出混合总计。
 - 空结果不等于事件从未发生。检查 TTL、版本、字段新旧格式、客户端网络与 WSDK 生命周期。
 - `event_time` 来自客户端 `Date.now()`；自然日或跨时区趋势必须显式说明 ClickHouse 时区。
