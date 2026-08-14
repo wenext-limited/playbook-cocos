@@ -31,7 +31,7 @@ TTL event_time + 180 DAY
 | `event_time` | `Date.now()` | 客户端事件时间；必须限制上下界 |
 | `event_id` | `ReportSystem.send` 参数 | 事件类型 |
 | `action` | WSDK `emEventAction` | 当前内置 Cocos 事件为 `cocos_js` |
-| `event_value` | `JSON.stringify(reportValue)` | 原始业务参数 JSON；gameType 用于默认新旧兼容，其他字段仅作受控回退 |
+| `event_value` | `JSON.stringify(reportValue)` | 原始业务参数 JSON；gameType 默认兼容，其他已验证字段按两阶段规则受控回退 |
 | `uid` | 原生初始化信息 | 用户 ID；`0` 代表不能作为已登录用户统计 |
 | `device_id` | 原生初始化信息 | 设备标识，仅在用户明确需要设备口径时使用 |
 | `platform` | 原生初始化信息 | 宿主平台 |
@@ -59,11 +59,33 @@ if(
 
 解析旧 gameType 会增加扫描成本。保持时间有界，尽量将具体 `event_id` 与 `action` 放入 `PREWHERE`；跨事件用户数等指标无法限定 `event_id` 时，仍使用统一表达式并报告扫描量。
 
-## 其他字段顶层优先策略
+## 其他业务字段两阶段自动回退
 
-JS 错误优先使用 `message`，其他业务字段采用下方类型化列。不要为了“可能存在旧数据”就在首轮 SQL 中为这些字段加入 `JSONExtract*`；解析 `event_value` 会显著放大扫描成本。
+gameType 以外的字段默认只查询顶层类型化列。查询下表中已有兼容映射的业务字段时，先在同一环境、App、游戏、`event_id` 和目标时间范围内自动执行有界兼容探测；用户明确只看新版顶层数据时才跳过。探测只查找“顶层为类型默认值、旧 JSON key 存在非默认有效值”的行，并使用 `LIMIT 1`。探测命中后，正式查询才使用统一逻辑字段自动融合；未命中则保持顶层查询。
 
-只有代码或小窗口抽样证明目标值仅存在于 JSON，或用户明确要求覆盖旧 WSDK 时，才对 gameType 以外的字段单独执行带 `--allow-event-value` 的受限回退查询。顶层为空时先检查调用点、字段类型和版本范围；不要直接触发全窗口 JSON 回退。
+不要把 `long_key_1 > 0` 当作所有业务字段已经提升到顶层的通用版本标记：WSDK 历史中各字段并非在同一提交完成提升。改用目标字段自身的有效值判断，顶层非默认有效值始终优先；仅在顶层为默认值时读取旧 key。对合法值也可能是 `0` 或空串的字段，只有旧 key 同时存在非默认值时才认为回退能补充数据。
+
+兼容查询必须设置 `short_circuit_function_evaluation = 'force_enable'` 并使用 `--allow-event-value`。过滤、分组、排序、去重和聚合都使用同一个逻辑字段，禁止分别统计新旧结果再相加。
+
+### 已验证的 WSDK 兼容映射
+
+| event_id | 逻辑字段 | 顶层列 | 旧 `event_value` key | 类型 |
+|---|---|---|---|---|
+| 所有内置事件 | 子游戏版本 | `game_version_code` | `gameVersionCode` | String |
+| 所有内置事件 | 会话事件序号 | `str_key_1` | `seqId` | String |
+| 所有内置事件 | WSDK 实例 ID | `id` | `uniqueId` | String |
+| `js_error` | 错误内容 | `message` | `err_msg` | String |
+| `app_to_game`, `game_to_app` | 调用名 | `name` | `call_name` | String |
+| `app_to_game`, `game_to_app` | 附加参数 | `str_key_2` | `extra` | String |
+| `game_flow` | 流程名 | `str_key_3` | `flow` | String |
+| `game_flow` | 流程参数 | `str_key_4` | `param` | String |
+| `net_protocol` | 主机、路径、协议类型、方法、错误 | `host`, `uri`, `type`, `method`, `error` | 同名 key | String |
+| `net_protocol` | 耗时、状态码 | `duration`, `code` | 同名 key | Int64 |
+| `net_protocol` | 服务端状态码 | `server_code` | 同名 key | Int32 |
+
+字符串逻辑字段使用“顶层非空，否则 `JSONExtractString`”；Int64 使用“顶层非零，否则 `JSONExtractInt`”；Int32 的 JSON 分支再转换为 `toInt32`。探测必须验证 JSON 值非空/非零，避免把合法的默认值误判成需要回退。已验证模板见 [query-cookbook.md](query-cookbook.md)。
+
+自定义事件只在代码确认后增加临时映射，映射至少包含 `event_id + 逻辑字段 + 顶层列 + 旧 JSON key + 类型 + 默认值判定`。`str_key_N`、`long_key_N` 可被不同事件复用，禁止跨事件套用上表语义。无法从调用代码确认时询问用户。
 
 ## 顶层类型化扩展字段
 
@@ -84,11 +106,11 @@ WSDK 只把白名单内且类型合法的值提升到顶层列。
 
 | event_id | 用途 | 已知业务字段 |
 |---|---|---|
-| `js_error` | Cocos JS 异常 | 新：`message`；旧：`event_value.err_msg` |
-| `app_to_game` | 原生到游戏桥接 | `name`, `str_key_2`(extra) |
-| `game_to_app` | 游戏到原生桥接 | `name`, `str_key_2`(extra) |
-| `game_flow` | 游戏流程 | `str_key_3`(flow), `str_key_4`(param) |
-| `net_protocol` | HTTP / Socket | `host`, `uri`, `type`, `duration`, `code`, `server_code`, `method`, `error` |
+| `js_error` | Cocos JS 异常 | 新：`message`；旧：`err_msg` |
+| `app_to_game` | 原生到游戏桥接 | 新：`name`, `str_key_2`；旧：`call_name`, `extra` |
+| `game_to_app` | 游戏到原生桥接 | 新：`name`, `str_key_2`；旧：`call_name`, `extra` |
+| `game_flow` | 游戏流程 | 新：`str_key_3`, `str_key_4`；旧：`flow`, `param` |
+| `net_protocol` | HTTP / Socket | 新旧 key 同名：`host`, `uri`, `type`, `duration`, `code`, `server_code`, `method`, `error` |
 | `anti_ban` | 防封禁 | `type`，其他字段由调用参数决定 |
 
 游戏也可通过 WSDK 或原生桥接上报自定义事件，所以本表不是完整事件字典。查询自定义事件前必须搜索目标项目代码。

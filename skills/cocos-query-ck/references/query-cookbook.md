@@ -16,11 +16,11 @@ WITH if(
 
 在同一查询中按 `game_type` 过滤并统一聚合，禁止相加新版与旧版去重用户数。每个模板都设置 `short_circuit_function_evaluation = 'force_enable'`，使 JSON 分支只在顶层 gameType 无效时执行。
 
-gameType 以外的字段仍默认使用顶层类型化列。只有代码或小窗口抽样证明字段仅存在于 JSON，或用户明确要求覆盖旧字段时，才为该字段增加受控回退。
+gameType 以外的字段仍默认使用顶层类型化列。需要兼容旧字段时，先执行下方探测；只有探测命中才在正式查询中加入统一逻辑字段。
 
-## JS 报错用户影响率
+## 其他业务字段的两阶段回退
 
-定义：有效 `js_error` 去重用户 ÷ 同 App、同游戏、同窗口内任意 Cocos 上报去重用户。使用 `--allow-cross-event --allow-event-value` 执行。
+先从 [schema.md](schema.md) 确认映射。兼容探测必须使用与正式查询相同的环境、App、游戏、`event_id` 和时间范围，只查找“顶层无有效值、旧 key 有有效值”的一行。以下示例检查 `game_flow.flow`；使用 `--allow-event-value` 执行：
 
 ```sql
 WITH if(
@@ -28,14 +28,64 @@ WITH if(
   ifNull(long_key_1, 0),
   toInt64(JSONExtractUInt(event_value, 'gameType'))
 ) AS game_type
+SELECT 1 AS fallback_needed
+FROM {table}
+PREWHERE event_id = 'game_flow' AND action = 'cocos_js'
+WHERE event_time >= now() - INTERVAL 1 DAY
+  AND event_time <= now()
+  AND game_type = 1
+  AND if(
+    notEmpty(ifNull(str_key_3, '')),
+    false,
+    notEmpty(JSONExtractString(event_value, 'flow'))
+  )
+LIMIT 1
+SETTINGS short_circuit_function_evaluation = 'force_enable'
+```
+
+- 返回一行：正式查询使用统一 `flow` 字段；返回空结果：正式查询继续只用 `str_key_3`。
+- 字符串探测使用“顶层为空且旧值非空”；数值探测使用“顶层为 `0` 且旧值非 `0`”。例如 `code` 的条件为 `if(ifNull(code, 0) != 0, false, JSONExtractInt(event_value, 'code') != 0)`。
+- 多个目标字段可以在同一探测中用 `OR` 连接各自的受控条件；任一命中后，正式查询只为已确认映射的目标字段生成兼容表达式。
+- 探测和正式查询都受 14 天单次范围限制；分段查询逐段采用同一流程。不要因为顶层查询超时而跳过探测直接解析 JSON。
+
+探测命中后的字符串统一表达式：
+
+```sql
+if(
+  notEmpty(ifNull(str_key_3, '')),
+  ifNull(str_key_3, ''),
+  JSONExtractString(event_value, 'flow')
+) AS flow
+```
+
+Int64 使用 `if(ifNull(code, 0) != 0, ifNull(code, 0), JSONExtractInt(event_value, 'code'))`；Int32 的 JSON 分支使用 `toInt32(JSONExtractInt(...))`。所有过滤、分组和聚合都引用统一别名，不再引用原始新旧字段。
+
+## JS 报错用户影响率
+
+定义：有效 `js_error` 去重用户 ÷ 同 App、同游戏、同窗口内任意 Cocos 上报去重用户。使用 `--allow-cross-event --allow-event-value` 执行。
+
+先探测 `message` → `err_msg`。若命中，使用下方兼容形式；未命中时把 `error_message` 定义为 `ifNull(message, '')`，不解析错误内容 JSON。
+
+```sql
+WITH
+  if(
+    ifNull(long_key_1, 0) > 0,
+    ifNull(long_key_1, 0),
+    toInt64(JSONExtractUInt(event_value, 'gameType'))
+  ) AS game_type,
+  if(
+    notEmpty(trim(ifNull(message, ''))),
+    ifNull(message, ''),
+    JSONExtractString(event_value, 'err_msg')
+  ) AS error_message
 SELECT
   uniqExactIf(uid, uid != 0) AS total_users,
   uniqExactIf(
     uid,
     uid != 0
       AND event_id = 'js_error'
-      AND notEmpty(trim(ifNull(message, '')))
-      AND message NOT LIKE '[JsError]: Script error. -%'
+      AND notEmpty(trim(error_message))
+      AND error_message NOT LIKE '[JsError]: Script error. -%'
   ) AS error_users,
   round(error_users / nullIf(total_users, 0) * 100, 4) AS error_user_rate_pct
 FROM {table}
@@ -99,17 +149,28 @@ SETTINGS short_circuit_function_evaluation = 'force_enable'
 
 ## 游戏流程分布
 
-WSDK `game_flow` 中 `str_key_3` 是 flow，`str_key_4` 是 param：
+WSDK `game_flow` 中 `str_key_3` 是 flow，`str_key_4` 是 param。先分别探测旧 `flow`、`param`；任一命中时使用下方兼容形式，均未命中时继续直接选择顶层列：
 
 ```sql
-WITH if(
-  ifNull(long_key_1, 0) > 0,
-  ifNull(long_key_1, 0),
-  toInt64(JSONExtractUInt(event_value, 'gameType'))
-) AS game_type
+WITH
+  if(
+    ifNull(long_key_1, 0) > 0,
+    ifNull(long_key_1, 0),
+    toInt64(JSONExtractUInt(event_value, 'gameType'))
+  ) AS game_type,
+  if(
+    notEmpty(ifNull(str_key_3, '')),
+    ifNull(str_key_3, ''),
+    JSONExtractString(event_value, 'flow')
+  ) AS flow,
+  if(
+    notEmpty(ifNull(str_key_4, '')),
+    ifNull(str_key_4, ''),
+    JSONExtractString(event_value, 'param')
+  ) AS param
 SELECT
-  str_key_3 AS flow,
-  str_key_4 AS param,
+  flow,
+  param,
   count() AS reports,
   uniqExactIf(uid, uid != 0) AS users
 FROM {table}
@@ -125,7 +186,7 @@ SETTINGS short_circuit_function_evaluation = 'force_enable'
 
 ## 网络失败率
 
-分母是所选协议请求上报数；如果用户要按用户或请求链路去重，先确认稳定 ID。
+分母是所选协议请求上报数；如果用户要按用户或请求链路去重，先确认稳定 ID。旧版 `net_protocol` 的 JSON key 与逻辑字段同名；探测任一目标字段命中后，按 schema 中的类型生成统一字段再代入下方统计，不要直接把顶层默认值当作真实旧版数据。
 
 ```sql
 WITH if(

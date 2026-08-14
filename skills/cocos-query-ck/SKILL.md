@@ -70,7 +70,7 @@ description: 查询和分析 WeNext Cocos Creator 游戏上报到 ClickHouse 的
 2. 游戏自定义事件：搜索游戏项目中 `ReportSystem.send(...)`、`reportSys.send(...)`、`stat(event_id, events)` 及目标 `event_id` 调用点。
 3. 不能从代码确定扩展字段含义时询问用户；不要根据 `str_key_N` / `long_key_N` 名称猜业务含义。
 4. gameType 是游戏范围字段，属于默认兼容例外：所有按游戏过滤的查询都使用统一 `game_type`，先取有效的顶层 `long_key_1`，仅当该行顶层值缺失或为 `0` 时读取 `event_value.gameType`。必须使用 `--allow-event-value`，并在 SQL 中设置 `short_circuit_function_evaluation = 'force_enable'`。
-5. 除 gameType 外，默认只查询顶层类型化列。不要在首轮 SQL 中为其他字段加入 `event_value`、`JSONExtract*` 或“顶层为空则解析 JSON”的兼容表达式。
+5. 除 gameType 外，默认先查询顶层类型化列。需要兼容旧业务字段时，按下方“两阶段自动回退”确认后再生成统一逻辑字段。
 
 统一 gameType 表达式固定为：
 
@@ -86,13 +86,30 @@ if(
 - 不要先查 `long_key_1` 再补查 JSON，也不要相加新旧去重用户数；同一 UID 可能同时出现在两种格式中。
 - 可同时返回 `countIf(ifNull(long_key_1, 0) > 0)` 与 `countIf(ifNull(long_key_1, 0) <= 0)`，让用户核验新版、旧版命中行数。
 
-除 gameType 外，仅在以下任一条件成立时回退 `event_value`：
+### 其他业务字段两阶段自动回退
 
-- 代码或字段定义确认目标参数没有对应顶层列；
-- 用户明确要求覆盖旧 WSDK / 旧版本，且该窗口确有旧数据；
-- 顶层查询结果异常或为空，并通过小时间窗抽样确认值只存在于 `event_value`。
+读取 [references/schema.md](references/schema.md) 中的已验证兼容映射，并按以下流程处理 gameType 以外的业务字段：
 
-其他字段回退时使用 `--allow-event-value` 单独执行有界查询，优先缩短时间窗并限定具体 `event_id`；不要把其他 JSON 回退永久合并进默认统计 SQL，也不要在顶层查询超时后自动改跑 JSON。模板见 [references/query-cookbook.md](references/query-cookbook.md)。
+1. **顶层优先**：默认只使用顶层类型化列。不要因为“可能有旧数据”直接给所有字段添加 `JSONExtract*`。
+2. **确认需要**：查询 schema 中已有兼容映射的业务字段时，先在同一环境、App、游戏、`event_id` 和目标时间范围内自动运行有界兼容探测；用户明确只看新版顶层数据时才跳过。探测只查找“顶层无有效值、旧 JSON 有有效值”的行并 `LIMIT 1`；不要用顶层查询超时作为回退依据。
+3. **自动融合**：探测命中后，在正式查询中生成“顶层有效值优先，否则读取已验证旧 key”的统一逻辑字段。过滤、分组、排序、去重和聚合全部使用该逻辑字段；新旧数据必须在同一条查询中统计，禁止分别计算后相加。
+4. **避免无效回退**：探测未命中时继续使用顶层字段，不在正式查询中解析该业务字段的 JSON。每个时间分段分别保持相同判断口径。
+5. **只用确认映射**：WSDK 内置字段直接使用 schema 中的映射；自定义事件先从调用代码确认 `event_id + 逻辑字段 + 顶层列 + 旧 JSON key + 类型`。无法确认或存在多个候选时询问用户，禁止根据槽位名猜测。
+
+字符串统一字段示例：
+
+```sql
+if(
+  notEmpty(ifNull(str_key_3, '')),
+  ifNull(str_key_3, ''),
+  JSONExtractString(event_value, 'flow')
+) AS flow
+```
+
+- 数值字段使用类型匹配的 `JSONExtractInt` / `JSONExtractFloat`，仅当顶层为类型默认值且旧 JSON 存在非默认有效值时确认需要回退。`0` 可能是合法值，因此探测条件必须同时验证旧值不是默认值；不要仅凭顶层等于 `0` 判断为旧数据。
+- 正式兼容查询必须添加 `--allow-event-value`，并设置 `short_circuit_function_evaluation = 'force_enable'`，使顶层有效的行不执行 JSON 分支。
+- 目标参数确实没有对应顶层列时属于 JSON-only 查询，不伪装成自动回退；确认字段和类型后执行有界 JSON 查询。
+- 兼容探测与统一字段模板见 [references/query-cookbook.md](references/query-cookbook.md)。
 
 ## 编写与执行查询
 
@@ -161,7 +178,7 @@ python3 <skill-dir>/scripts/query_ck.py --env prod --database yoki \
 1. database 来自已验证的 App，而不是 `app` 列；禁止 `WHERE app = ...`。
 2. `event_time` 同时有下界和上界；上界用于排除客户端未来时间。单次跨度不超过 14 天；更长范围已按固定边界拆成连续、无重叠的半开区间并依次查询。
 3. 普通查询有具体 `event_id = ...` 或 `IN (...)`；跨事件查询满足专用保护条件。
-4. Cocos WSDK 事件限定 `action = 'cocos_js'`；游戏范围使用统一 `game_type`，顶层 `long_key_1` 有效时优先采用，否则读取旧版 `event_value.gameType`。命令包含 `--allow-event-value`，SQL 强制启用短路计算。
+4. Cocos WSDK 事件限定 `action = 'cocos_js'`；游戏范围使用统一 `game_type`，顶层 `long_key_1` 有效时优先采用，否则读取旧版 `event_value.gameType`。其他业务字段仅在兼容探测命中后使用已验证映射自动融合。兼容命令包含 `--allow-event-value`，SQL 强制启用短路计算。
 5. `event_id` 与 `action` 尽可能放在 `PREWHERE`；避免 `SELECT *`，明细必须有合理 `LIMIT`。
 6. 用户统计排除 `uid = 0`；金额、订单、动作等选择代表真实业务对象的去重键，不能默认用 `count()`。
 7. 不输出密码、token、完整 UID/device_id 列表或不必要的错误隐私数据。
@@ -172,6 +189,7 @@ python3 <skill-dir>/scripts/query_ck.py --env prod --database yoki \
 
 - 跨 App 查询逐个显示成功、空结果与失败；不要把失败 App 当作 0。
 - 按游戏查询时同时说明统一 gameType 口径；若返回了新版与旧版命中行数，分别展示，但最终用户数、比率和其他去重指标只能使用统一聚合结果。
+- 业务字段兼容探测命中时，说明采用的“顶层列 → 旧 JSON key”映射；未命中时说明正式查询仅使用顶层字段。
 - 同时查询生产和测试时分别给出两组来源信息与结果，禁止给出混合总计。
 - 空结果不等于事件从未发生。检查 TTL、版本、字段新旧格式、客户端网络与 WSDK 生命周期。
 - `event_time` 来自客户端 `Date.now()`；自然日或跨时区趋势必须显式说明 ClickHouse 时区。
