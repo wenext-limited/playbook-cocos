@@ -46,6 +46,10 @@ PROTECTED_QUERY_SETTINGS = re.compile(
     r"\b(?:max_execution_time|timeout_before_checking_execution_speed|timeout_overflow_mode|max_memory_usage|max_bytes_to_read|max_rows_to_read|read_overflow_mode)\b",
     re.I,
 )
+DIRECT_TOP_LEVEL_GAME_FILTER = re.compile(
+    r"\b(?:PREWHERE|WHERE)\b(?:(?!\b(?:GROUP\s+BY|ORDER\s+BY|LIMIT|SETTINGS|FORMAT|UNION)\b)[\s\S])*?\blong_key_1\b\s*(?:=|IN\s*\()",
+    re.I,
+)
 MAX_QUERY_WINDOW_DAYS = 14
 MAX_EXECUTION_TIME_SECONDS = 60.0
 MAX_MEMORY_USAGE_BYTES = 2 * 1024 * 1024 * 1024
@@ -250,6 +254,12 @@ def validate_sql(
 
     event_table_used = "{table}" in sql or re.search(rf"\b{re.escape(table)}\b", normalized, re.I)
     if event_table_used:
+        if DIRECT_TOP_LEVEL_GAME_FILTER.search(normalized):
+            raise QueryFailure(
+                "Direct long_key_1 gameType filters exclude legacy rows; use the unified game_type expression "
+                "(top-level long_key_1 first, then event_value.gameType) with --allow-event-value",
+                3,
+            )
         has_lower = re.search(r"\bevent_time\b\s*(?:>=|>|BETWEEN\b)", normalized, re.I)
         has_upper = re.search(r"\bevent_time\b\s*(?:<=|<|BETWEEN\b)", normalized, re.I)
         if not (has_lower and has_upper):
@@ -396,7 +406,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--table", help="Override the environment event table")
     parser.add_argument("--config", type=Path, default=Path.home() / ".wenext" / "clickhouse.json")
     parser.add_argument("--allow-cross-event", action="store_true")
-    parser.add_argument("--allow-event-value", action="store_true", help="Allow explicit legacy/custom JSON fallback after top-level fields are ruled out")
+    parser.add_argument(
+        "--allow-event-value",
+        action="store_true",
+        help="Allow unified gameType parsing and explicit legacy/custom JSON fallbacks",
+    )
     parser.add_argument("--validate-only", action="store_true", help="Validate and print SQL without connecting")
     parser.add_argument("--timeout", type=float, default=64)
     parser.add_argument("--retries", type=int, default=3)
