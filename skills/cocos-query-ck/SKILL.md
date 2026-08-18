@@ -29,19 +29,28 @@ description: 查询和分析 WeNext Cocos Creator 游戏上报到 ClickHouse 的
 | 生产 | `prod` | `event_local_prod` |
 | 测试 | `test` | `event_local_test` |
 
+## 选择 Python 启动命令
+
+先按平台解析下文的 `<python>`：
+
+- macOS/Linux：使用 `python3`。
+- Windows PowerShell：优先使用 `py -3`；不可用时使用 `python`。
+
+所有命令都必须通过 `scripts/python_runner.py` 执行，禁止直接调用 `query_ck.py` 或 `resolve_scope.py`。启动器会在目标解释器启动前固定设置 `PYTHONDONTWRITEBYTECODE=1`，两个目标脚本也会校验该设置，缺少时即拒绝运行。该方式不依赖 Unix 行内环境变量语法或额外解释器开关，可在 macOS 与 Windows 使用。
+
 ## 解析查询范围
 
 按“App → 游戏 → 时间 → 指标 → 事件/字段”的顺序解析。只询问缺失且会改变结果的条件。
 
 ### App
 
-- 单 App：运行 `python3 -B <skill-dir>/scripts/resolve_scope.py match-app '<name>'`。仅远端 App 列表中的不区分大小写精确匹配可直接使用。
-- 所有 App：运行 `python3 -B <skill-dir>/scripts/resolve_scope.py apps` 动态获取列表；不要维护硬编码清单，也不要查询系统数据库。
+- 单 App：运行 `<python> <skill-dir>/scripts/python_runner.py resolve match-app '<name>'`。仅远端 App 列表中的不区分大小写精确匹配可直接使用。
+- 所有 App：运行 `<python> <skill-dir>/scripts/python_runner.py resolve apps` 动态获取列表；不要维护硬编码清单，也不要查询系统数据库。
 - 用户没有给 App，而指标不能自然解释为跨 App 时，询问。不要从当前游戏仓库名推断宿主 App。
 
 ### 游戏与 gameType
 
-运行 `python3 -B <skill-dir>/scripts/resolve_scope.py match-game '<name>'`，从 WSDK 最新 `Const.GameType` 解析枚举名、ID 和注释别名。
+运行 `<python> <skill-dir>/scripts/python_runner.py resolve match-game '<name>'`，从 WSDK 最新 `Const.GameType` 解析枚举名、ID 和注释别名。
 
 - `exact`：可以直接采用。
 - `needs_confirmation`、`ambiguous` 或 `not_found`：展示已有候选；没有候选时先列出可用游戏，再询问。不要把唯一模糊候选当作用户确认。
@@ -115,21 +124,20 @@ if(
 
 从 [references/query-cookbook.md](references/query-cookbook.md) 中最接近的模板开始，不要徒手重写通用口径。
 
-执行本 Skill 的所有 Python 脚本时统一使用 `python3 -B`，禁止省略 `-B`，避免生成 `.pyc` 和 `__pycache__` 污染工作区。
+执行本 Skill 的所有 Python 脚本时统一使用上述平台命令和 `python_runner.py`；不要省略启动器。
 
 普通生产单事件查询：
 
-```bash
-python3 -B <skill-dir>/scripts/query_ck.py --env prod --database yoki --allow-event-value \
-  "WITH if(ifNull(long_key_1, 0) > 0, ifNull(long_key_1, 0), toInt64(JSONExtractUInt(event_value, 'gameType'))) AS game_type SELECT count() AS events FROM {table} PREWHERE event_id = 'game_flow' AND action = 'cocos_js' WHERE event_time >= now() - INTERVAL 1 DAY AND event_time <= now() AND game_type = 1 SETTINGS short_circuit_function_evaluation = 'force_enable'"
+```text
+<python> <skill-dir>/scripts/python_runner.py query --env prod --database yoki --allow-event-value "WITH if(ifNull(long_key_1, 0) > 0, ifNull(long_key_1, 0), toInt64(JSONExtractUInt(event_value, 'gameType'))) AS game_type SELECT count() AS events FROM {table} PREWHERE event_id = 'game_flow' AND action = 'cocos_js' WHERE event_time >= now() - INTERVAL 1 DAY AND event_time <= now() AND game_type = 1 SETTINGS short_circuit_function_evaluation = 'force_enable'"
 ```
 
 查询测试环境时仅把环境参数改为 `--env test`，不要改 SQL 中的 `{table}`。
 
 跨 App 时先解析 App 列表，再一次执行同一条 SQL：
 
-```bash
-python3 -B <skill-dir>/scripts/query_ck.py --all-apps --allow-cross-event --allow-event-value '<SQL>'
+```text
+<python> <skill-dir>/scripts/python_runner.py query --all-apps --allow-cross-event --allow-event-value '<SQL>'
 ```
 
 按游戏查询时必须显式加 `--allow-event-value` 以执行统一 gameType 表达式。查询用户数、错误率或事件发现等需要读取同游戏多个 `event_id` 的指标时，还必须显式加 `--allow-cross-event`。它们不是通用绕过开关；脚本仍要求有界时间、`action = 'cocos_js'` 和 gameType 过滤。
@@ -145,23 +153,18 @@ python3 -B <skill-dir>/scripts/query_ck.py --all-apps --allow-cross-event --allo
 
 所有资源上限通过 HTTP 查询参数传递，禁止在 SQL `SETTINGS` 中设置或覆盖。`throw` 模式固定不可选，确保超限时报错而不是返回不完整结果。脚本硬限制 `--max-execution-time` 最高 60 秒、`--max-memory-usage` 最高 2 GiB，用户不得提高或绕过；`--max-execution-time` 还必须小于客户端 `--timeout`。例如服务端 50 秒、客户端默认 64 秒：
 
-```bash
-python3 -B <skill-dir>/scripts/query_ck.py --env prod --database yoki \
-  --max-execution-time 50 --max-memory-usage 2147483648 \
-  --max-bytes-to-read 107374182400 --max-rows-to-read 1000000000 '<SQL>'
+```text
+<python> <skill-dir>/scripts/python_runner.py query --env prod --database yoki --max-execution-time 50 --max-memory-usage 2147483648 --max-bytes-to-read 107374182400 --max-rows-to-read 1000000000 '<SQL>'
 ```
 
 使用 `--validate-only` 时检查输出中的 `settings`，确认所有自动附带和用户指定的限制符合预期。分段查询时每段使用相同的资源上限。
 
 总时间范围超过 14 天时，执行多次脚本调用，每段使用固定的 ISO 时间边界且不超过 14 天。例如 30 天拆为 14 天、14 天、2 天三个半开区间：
 
-```bash
-python3 -B <skill-dir>/scripts/query_ck.py --env prod --database yoki \
-  "<相同统计 SQL；event_time >= '固定开始时间' AND event_time < '第 1 个边界'>"
-python3 -B <skill-dir>/scripts/query_ck.py --env prod --database yoki \
-  "<相同统计 SQL；event_time >= '第 1 个边界' AND event_time < '第 2 个边界'>"
-python3 -B <skill-dir>/scripts/query_ck.py --env prod --database yoki \
-  "<相同统计 SQL；event_time >= '第 2 个边界' AND event_time < '固定结束时间'>"
+```text
+<python> <skill-dir>/scripts/python_runner.py query --env prod --database yoki "<相同统计 SQL；event_time >= '固定开始时间' AND event_time < '第 1 个边界'>"
+<python> <skill-dir>/scripts/python_runner.py query --env prod --database yoki "<相同统计 SQL；event_time >= '第 1 个边界' AND event_time < '第 2 个边界'>"
+<python> <skill-dir>/scripts/python_runner.py query --env prod --database yoki "<相同统计 SQL；event_time >= '第 2 个边界' AND event_time < '固定结束时间'>"
 ```
 
 合并分段结果时保持原统计口径：

@@ -19,6 +19,16 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
+if (
+    os.environ.get("PYTHONDONTWRITEBYTECODE") != "1"
+    or not sys.dont_write_bytecode
+):
+    print(
+        "Run through python_runner.py so PYTHONDONTWRITEBYTECODE=1 is enforced",
+        file=sys.stderr,
+    )
+    raise SystemExit(2)
+
 from resolve_scope import fetch_apps
 
 ENVIRONMENTS = {
