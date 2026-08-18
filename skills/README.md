@@ -11,6 +11,9 @@
 - `cocos-query-config/`
   按 APP 和游戏查询 Wiki 配置表中的 `operationConfigReadUrl` 与 `gameConfigId`，读取线上运营配置并生成 HTML 格式化 JSON 报告。
 
+- `cocos-grafana-dashboard/`
+  创建、更新和验证 Cocos ClickHouse 指标看板。初始化仅需 Grafana Token，内置 WeNext Cocos 环境和前端 ClickHouse 数据源；目标文件夹从用户提供的 Grafana URL 解析，不绑定默认文件夹，并对生产写入执行查询验证、完整 diff、备份和 resourceVersion 并发保护。
+
 - `cocos-project-setup/`
   新建 Cocos Creator 游戏项目时使用。推荐从 `skills/cocos-project-setup/new_project_code/` 模板拷贝基础代码快速搭建，也支持手动创建。包括脚手架搭建、初始化配置、入口类编写、插件安装、子游戏模板定制。
 
