@@ -35,13 +35,13 @@ description: 查询和分析 WeNext Cocos Creator 游戏上报到 ClickHouse 的
 
 ### App
 
-- 单 App：运行 `scripts/resolve_scope.py match-app '<name>'`。仅远端 App 列表中的不区分大小写精确匹配可直接使用。
-- 所有 App：运行 `scripts/resolve_scope.py apps` 动态获取列表；不要维护硬编码清单，也不要查询系统数据库。
+- 单 App：运行 `python3 -B <skill-dir>/scripts/resolve_scope.py match-app '<name>'`。仅远端 App 列表中的不区分大小写精确匹配可直接使用。
+- 所有 App：运行 `python3 -B <skill-dir>/scripts/resolve_scope.py apps` 动态获取列表；不要维护硬编码清单，也不要查询系统数据库。
 - 用户没有给 App，而指标不能自然解释为跨 App 时，询问。不要从当前游戏仓库名推断宿主 App。
 
 ### 游戏与 gameType
 
-运行 `scripts/resolve_scope.py match-game '<name>'`，从 WSDK 最新 `Const.GameType` 解析枚举名、ID 和注释别名。
+运行 `python3 -B <skill-dir>/scripts/resolve_scope.py match-game '<name>'`，从 WSDK 最新 `Const.GameType` 解析枚举名、ID 和注释别名。
 
 - `exact`：可以直接采用。
 - `needs_confirmation`、`ambiguous` 或 `not_found`：展示已有候选；没有候选时先列出可用游戏，再询问。不要把唯一模糊候选当作用户确认。
@@ -115,10 +115,12 @@ if(
 
 从 [references/query-cookbook.md](references/query-cookbook.md) 中最接近的模板开始，不要徒手重写通用口径。
 
+执行本 Skill 的所有 Python 脚本时统一使用 `python3 -B`，禁止生成 `.pyc` 和 `__pycache__` 污染工作区；仓库根目录 `.gitignore` 同时忽略 Python 字节码缓存作为兜底。
+
 普通生产单事件查询：
 
 ```bash
-python3 <skill-dir>/scripts/query_ck.py --env prod --database yoki --allow-event-value \
+python3 -B <skill-dir>/scripts/query_ck.py --env prod --database yoki --allow-event-value \
   "WITH if(ifNull(long_key_1, 0) > 0, ifNull(long_key_1, 0), toInt64(JSONExtractUInt(event_value, 'gameType'))) AS game_type SELECT count() AS events FROM {table} PREWHERE event_id = 'game_flow' AND action = 'cocos_js' WHERE event_time >= now() - INTERVAL 1 DAY AND event_time <= now() AND game_type = 1 SETTINGS short_circuit_function_evaluation = 'force_enable'"
 ```
 
@@ -127,7 +129,7 @@ python3 <skill-dir>/scripts/query_ck.py --env prod --database yoki --allow-event
 跨 App 时先解析 App 列表，再一次执行同一条 SQL：
 
 ```bash
-python3 <skill-dir>/scripts/query_ck.py --all-apps --allow-cross-event --allow-event-value '<SQL>'
+python3 -B <skill-dir>/scripts/query_ck.py --all-apps --allow-cross-event --allow-event-value '<SQL>'
 ```
 
 按游戏查询时必须显式加 `--allow-event-value` 以执行统一 gameType 表达式。查询用户数、错误率或事件发现等需要读取同游戏多个 `event_id` 的指标时，还必须显式加 `--allow-cross-event`。它们不是通用绕过开关；脚本仍要求有界时间、`action = 'cocos_js'` 和 gameType 过滤。
@@ -144,7 +146,7 @@ python3 <skill-dir>/scripts/query_ck.py --all-apps --allow-cross-event --allow-e
 所有资源上限通过 HTTP 查询参数传递，禁止在 SQL `SETTINGS` 中设置或覆盖。`throw` 模式固定不可选，确保超限时报错而不是返回不完整结果。脚本硬限制 `--max-execution-time` 最高 60 秒、`--max-memory-usage` 最高 2 GiB，用户不得提高或绕过；`--max-execution-time` 还必须小于客户端 `--timeout`。例如服务端 50 秒、客户端默认 64 秒：
 
 ```bash
-python3 <skill-dir>/scripts/query_ck.py --env prod --database yoki \
+python3 -B <skill-dir>/scripts/query_ck.py --env prod --database yoki \
   --max-execution-time 50 --max-memory-usage 2147483648 \
   --max-bytes-to-read 107374182400 --max-rows-to-read 1000000000 '<SQL>'
 ```
@@ -154,11 +156,11 @@ python3 <skill-dir>/scripts/query_ck.py --env prod --database yoki \
 总时间范围超过 14 天时，执行多次脚本调用，每段使用固定的 ISO 时间边界且不超过 14 天。例如 30 天拆为 14 天、14 天、2 天三个半开区间：
 
 ```bash
-python3 <skill-dir>/scripts/query_ck.py --env prod --database yoki \
+python3 -B <skill-dir>/scripts/query_ck.py --env prod --database yoki \
   "<相同统计 SQL；event_time >= '固定开始时间' AND event_time < '第 1 个边界'>"
-python3 <skill-dir>/scripts/query_ck.py --env prod --database yoki \
+python3 -B <skill-dir>/scripts/query_ck.py --env prod --database yoki \
   "<相同统计 SQL；event_time >= '第 1 个边界' AND event_time < '第 2 个边界'>"
-python3 <skill-dir>/scripts/query_ck.py --env prod --database yoki \
+python3 -B <skill-dir>/scripts/query_ck.py --env prod --database yoki \
   "<相同统计 SQL；event_time >= '第 2 个边界' AND event_time < '固定结束时间'>"
 ```
 
