@@ -5,12 +5,23 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
+
+if (
+    os.environ.get("PYTHONDONTWRITEBYTECODE") != "1"
+    or not sys.dont_write_bytecode
+):
+    print(
+        "Run through python_runner.py so PYTHONDONTWRITEBYTECODE=1 is enforced",
+        file=sys.stderr,
+    )
+    raise SystemExit(2)
 
 APP_LIST_URL = "https://lama-dev1-1314119829.cos.ap-guangzhou.myqcloud.com/game-test/app_list.json"
 GAME_TYPE_RAW_URL = "https://raw.githubusercontent.com/wenext-limited/cocos-game-wsdk/main/assets/Const.ts"
