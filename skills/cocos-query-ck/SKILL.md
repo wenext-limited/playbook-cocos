@@ -115,7 +115,7 @@ if(
 
 从 [references/query-cookbook.md](references/query-cookbook.md) 中最接近的模板开始，不要徒手重写通用口径。
 
-执行本 Skill 的所有 Python 脚本时统一使用 `python3 -B`，禁止生成 `.pyc` 和 `__pycache__` 污染工作区；仓库根目录 `.gitignore` 同时忽略 Python 字节码缓存作为兜底。
+执行本 Skill 的所有 Python 脚本时统一使用 `python3 -B`，禁止省略 `-B`，避免生成 `.pyc` 和 `__pycache__` 污染工作区。
 
 普通生产单事件查询：
 
